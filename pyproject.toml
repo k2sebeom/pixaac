@@ -1,0 +1,17 @@
+[project]
+name = "agentsprite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "k2sebeom", email = "moses97@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+agentsprite = "agentsprite:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
