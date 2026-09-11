@@ -1,17 +1,29 @@
 [project]
 name = "agentsprite"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pixel-art sprite and sprite-sheet editor for AI agents, exposed as a CLI and an MCP server"
 readme = "README.md"
 authors = [
     { name = "k2sebeom", email = "moses97@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "mcp>=2",
+    "pillow>=12.3.0",
+    "typer>=0.27.2",
+]
 
 [project.scripts]
-agentsprite = "agentsprite:main"
+agentsprite = "agentsprite.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

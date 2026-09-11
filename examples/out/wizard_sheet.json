@@ -1,0 +1,149 @@
+{
+  "frames": [
+    {
+      "filename": "wizard_0_idle",
+      "index": 0,
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "duration": 220
+    },
+    {
+      "filename": "wizard_1_bob1",
+      "index": 1,
+      "frame": {
+        "x": 132,
+        "y": 2,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "duration": 220
+    },
+    {
+      "filename": "wizard_2_glow",
+      "index": 2,
+      "frame": {
+        "x": 262,
+        "y": 2,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "duration": 220
+    },
+    {
+      "filename": "wizard_3_bob2",
+      "index": 3,
+      "frame": {
+        "x": 392,
+        "y": 2,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "duration": 220
+    }
+  ],
+  "meta": {
+    "app": "agentsprite",
+    "version": "0.1",
+    "format": "RGBA8888",
+    "size": {
+      "w": 522,
+      "h": 132
+    },
+    "scale": "4",
+    "frameSize": {
+      "w": 128,
+      "h": 128
+    },
+    "columns": 4,
+    "rows": 1,
+    "padding": 2,
+    "frameTags": [
+      {
+        "name": "idle",
+        "from": 0,
+        "to": 3,
+        "direction": "forward",
+        "repeat": "0"
+      }
+    ],
+    "layers": [
+      {
+        "name": "base",
+        "opacity": 255,
+        "blendMode": "normal"
+      },
+      {
+        "name": "staff",
+        "opacity": 255,
+        "blendMode": "normal"
+      }
+    ],
+    "palette": {
+      ".": null,
+      "k": "#1b1b2f",
+      "p": "#5b3a8c",
+      "P": "#8f63c9",
+      "d": "#3a2260",
+      "s": "#f2c9a0",
+      "w": "#ecebf3",
+      "g": "#b8b6c8",
+      "y": "#f2c94c",
+      "o": "#8c5a2b",
+      "c": "#5ee0ff",
+      "C": "#c8f6ff"
+    },
+    "image": "wizard_sheet.png"
+  }
+}
