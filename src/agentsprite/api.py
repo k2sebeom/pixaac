@@ -11,13 +11,15 @@ from pathlib import Path
 from typing import Callable
 
 from . import ops, presets, render, view
-from .model import Layer, Palette, Sprite, SpriteError
-from .ops import Region
+from .model import TRANSPARENT_KEY, Layer, Palette, Sprite, SpriteError, anchor_offset, normalize_anchor
+from .ops import Keys, Region
 
 FrameRef = str | int
+"""Frame index, name, ``"all"``, or a comma-separated list of those (``"1,3"``, ``"0..2,5"``)."""
 LayerRef = str | int | None
 
 ALL = "all"
+SHOW_DEFAULT = "bbox"
 
 
 def parse_region(text: str | None) -> Region:
@@ -38,14 +40,47 @@ def _region_str(region: Region) -> str:
 
 
 def _target_frames(sprite: Sprite, frame: FrameRef) -> list[int]:
-    if isinstance(frame, str) and frame.lower() == ALL:
+    """Resolve a frame ref to a list of frame indices.
+
+    Accepts an index, a name, ``"all"``, an inclusive range ``"a..b"`` and
+    comma-separated combinations (``"1,3"``, ``"0..2,idle4"``). Order is kept,
+    duplicates dropped.
+    """
+    if isinstance(frame, int):
+        return [sprite.frame_index(frame)]
+    text = str(frame).strip()
+    if text.lower() == ALL:
         return list(range(len(sprite.frames)))
-    return [sprite.frame_index(frame)]
+    if any(f.name == text for f in sprite.frames):
+        return [sprite.frame_index(text)]
+    out: list[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if part.lower() == ALL:
+            idxs = list(range(len(sprite.frames)))
+        elif ".." in part and not any(f.name == part for f in sprite.frames):
+            a, b = part.split("..", 1)
+            ia, ib = sprite.frame_index(a.strip()), sprite.frame_index(b.strip())
+            idxs = list(range(min(ia, ib), max(ia, ib) + 1))
+        else:
+            idxs = [sprite.frame_index(part)]
+        for i in idxs:
+            if i not in out:
+                out.append(i)
+    if not out:
+        raise SpriteError(f"no frames selected by {frame!r}")
+    return out
 
 
 def _target_layer(sprite: Sprite, fi: int, layer: LayerRef) -> Layer:
     f = sprite.frames[fi]
     return f.layer(layer if layer is not None else 0)
+
+
+def _frames_str(frames: list[int]) -> str:
+    return f"frame {frames[0]}" if len(frames) == 1 else f"frames {','.join(str(i) for i in frames)}"
 
 
 def _edit(
@@ -54,20 +89,29 @@ def _edit(
     layer: LayerRef,
     op: Callable[[Layer, Sprite], int],
     what: str,
-    show: bool = True,
+    show: str = SHOW_DEFAULT,
 ) -> str:
-    """Apply ``op`` to the selected layer(s), save, and describe the result."""
+    """Apply ``op`` to the selected layer(s), save, and describe the result.
+
+    ``show`` controls what is echoed after the summary line: ``"none"``,
+    ``"bbox"`` (box around the changed pixels of the first target frame, with
+    absolute rulers) or ``"full"`` (the whole frame).
+    """
+    mode = view.show_mode(show)
     sprite = Sprite.load(path)
     total = 0
     frames = _target_frames(sprite, frame)
+    first = _target_layer(sprite, frames[0], layer)
+    before = [row[:] for row in first.grid]
     for fi in frames:
         total += op(_target_layer(sprite, fi, layer), sprite)
     sprite.save(path)
-    msg = f"{what}: {total} pixels affected in {len(frames)} frame(s)"
-    if show:
-        msg += "\n" + view.frame_text(sprite, frames[0], layer)
-        if len(frames) > 1:
-            msg += f"\n(+{len(frames) - 1} more frame(s) changed; use show to inspect)"
+    msg = f"{what}: {total} pixels affected in {_frames_str(frames)}"
+    body = view.edit_result_text(sprite, frames[0], layer, before, first, mode)
+    if body:
+        msg += "\n" + body
+    if len(frames) > 1 and mode != "none":
+        msg += f"\n(+{len(frames) - 1} more frame(s) changed; use show to inspect)"
     return msg
 
 
@@ -114,15 +158,17 @@ def show(
     all_frames: bool = False,
     ruler: bool = True,
     onion: str | int | None = None,
+    onion_layer: str | int | None = None,
 ) -> str:
     sprite = Sprite.load(path)
     if all_frames:
         return view.all_frames_text(sprite, layer)
-    return view.frame_text(sprite, frame, layer, ruler=ruler, onion=onion)
+    return view.frame_text(sprite, frame, layer, ruler=ruler, onion=onion, onion_layer=onion_layer)
 
 
-def diff(path: str | Path, a: FrameRef, b: FrameRef, layer: LayerRef = None) -> str:
-    return view.diff_text(Sprite.load(path), a, b, layer)
+def diff(path: str | Path, a: FrameRef, b: FrameRef, layer: LayerRef = None, limit: int = 0) -> str:
+    """How frame ``b`` differs from ``a``; ``limit`` caps the per-pixel list (0 = grid only, -1 = all)."""
+    return view.diff_text(Sprite.load(path), a, b, layer, limit)
 
 
 def validate(path: str | Path) -> str:
@@ -130,11 +176,28 @@ def validate(path: str | Path) -> str:
     return "ok" if not problems else "\n".join(problems)
 
 
-def resize(path: str | Path, width: int, height: int, anchor: str = "top-left") -> str:
+def _pixel_count(sprite: Sprite) -> int:
+    return sum(
+        1 for f in sprite.frames for l in f.layers for row in l.grid for ch in row if ch != TRANSPARENT_KEY
+    )
+
+
+def resize(path: str | Path, width: int, height: int, anchor: str = "top-left", show: str = SHOW_DEFAULT) -> str:
+    """Resize the canvas. ``show`` = none | bbox (content box of frame 0, default) | full."""
+    mode = view.show_mode(show)
     sprite = Sprite.load(path)
+    anchor = normalize_anchor(anchor)
+    ow, oh = sprite.width, sprite.height
+    dx, dy = anchor_offset(anchor, ow, oh, width, height)
+    was = _pixel_count(sprite)
     sprite.resize(width, height, anchor)
     sprite.save(path)
-    return f"resized to {width}x{height} (anchor {anchor})\n" + view.frame_text(sprite, 0)
+    msg = f"resized {ow}x{oh} -> {width}x{height} (anchor {anchor}; content moved by ({dx:+d},{dy:+d}))"
+    lost = was - _pixel_count(sprite)
+    if lost:
+        msg += f"; {lost} pixels cropped away"
+    body = view.resize_result_text(sprite, mode)
+    return msg + ("\n" + body if body else "")
 
 
 def set_notes(path: str | Path, notes: str) -> str:
@@ -212,13 +275,26 @@ def frame_add(
     duration_ms: int = 100,
     copy_from: FrameRef | None = None,
     at: int | None = None,
+    count: int = 1,
 ) -> str:
+    """Add ``count`` frames (default 1). With a ``name`` and ``count > 1`` the
+    frames are named ``name0, name1, ...``."""
+    if count < 1:
+        raise SpriteError("count must be at least 1")
     sprite = Sprite.load(path)
-    f = sprite.add_frame(name, duration_ms, copy_from, at)
+    # resolve the source by name so inserting before it does not shift the reference
+    src_name = sprite.frame(copy_from).name if copy_from is not None else None
+    added = []
+    for i in range(count):
+        n = name if (name is None or count == 1) else f"{name}{i}"
+        pos = None if at is None else at + i
+        added.append(sprite.add_frame(n, duration_ms, src_name, pos))
     sprite.save(path)
-    idx = sprite.frames.index(f)
     src = f" (copied from {copy_from})" if copy_from is not None else ""
-    return f"added frame [{idx}] {f.name}{src}; now {len(sprite.frames)} frames"
+    listing = ", ".join(f"[{sprite.frames.index(f)}] {f.name}" for f in added)
+    if count == 1:
+        return f"added frame {listing}{src}; now {len(sprite.frames)} frames"
+    return f"added {count} frames: {listing}{src}; now {len(sprite.frames)} frames"
 
 
 def frame_remove(path: str | Path, frame: FrameRef) -> str:
@@ -230,10 +306,14 @@ def frame_remove(path: str | Path, frame: FrameRef) -> str:
 
 
 def frame_move(path: str | Path, frame: FrameRef, to: int) -> str:
+    """Move a frame to a new index. Tags keep pointing at the same frames (see :meth:`Sprite.move_frame`)."""
     sprite = Sprite.load(path)
     sprite.move_frame(frame, to)
     sprite.save(path)
-    return "frames: " + ", ".join(f"[{i}] {f.name}" for i, f in enumerate(sprite.frames))
+    msg = "frames: " + ", ".join(f"[{i}] {f.name}" for i, f in enumerate(sprite.frames))
+    if sprite.tags:
+        msg += "\ntags: " + ", ".join(f"{t.name}: {t.start}..{t.end}" for t in sprite.tags)
+    return msg
 
 
 def frame_update(
@@ -301,11 +381,7 @@ def layer_visible(path: str | Path, layer: str | int, visible: bool) -> str:
 
 
 def layer_list(path: str | Path) -> str:
-    sprite = Sprite.load(path)
-    f0 = sprite.frames[0]
-    return "\n".join(
-        f"[{i}] {l.name}" + ("" if l.visible else "  (hidden)") for i, l in enumerate(f0.layers)
-    )
+    return view.layers_text(Sprite.load(path))
 
 
 # --------------------------------------------------------------------------- #
@@ -343,19 +419,39 @@ def tag_list(path: str | Path) -> str:
 # --------------------------------------------------------------------------- #
 # drawing
 # --------------------------------------------------------------------------- #
+#
+# Every drawing/transform function takes ``show`` = "none" | "bbox" | "full"
+# (default "bbox": only the box around the changed pixels is echoed back).
+
+
+def _keys_str(keys: Keys) -> str:
+    return "" if keys is None else f" keys({keys})"
 
 
 def draw_pixels(
-    path: str | Path, points: list[tuple[int, int]], key: str, frame: FrameRef = 0, layer: LayerRef = None
+    path: str | Path,
+    points: list[tuple[int, int]],
+    key: str,
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.pixels(l, s.palette, points, key), f"pixels {key!r}")
+    return _edit(path, frame, layer, lambda l, s: ops.pixels(l, s.palette, points, key), f"pixels {key!r}", show)
 
 
 def draw_line(
-    path: str | Path, x0: int, y0: int, x1: int, y1: int, key: str, frame: FrameRef = 0, layer: LayerRef = None
+    path: str | Path,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    key: str,
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     return _edit(
-        path, frame, layer, lambda l, s: ops.line(l, s.palette, x0, y0, x1, y1, key), f"line {key!r}"
+        path, frame, layer, lambda l, s: ops.line(l, s.palette, x0, y0, x1, y1, key), f"line {key!r}", show
     )
 
 
@@ -369,6 +465,7 @@ def draw_rect(
     fill: bool = False,
     frame: FrameRef = 0,
     layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     return _edit(
         path,
@@ -376,6 +473,7 @@ def draw_rect(
         layer,
         lambda l, s: ops.rect(l, s.palette, x0, y0, x1, y1, key, fill),
         f"{'filled ' if fill else ''}rect {key!r}",
+        show,
     )
 
 
@@ -389,6 +487,7 @@ def draw_ellipse(
     fill: bool = False,
     frame: FrameRef = 0,
     layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     return _edit(
         path,
@@ -396,23 +495,85 @@ def draw_ellipse(
         layer,
         lambda l, s: ops.ellipse(l, s.palette, x0, y0, x1, y1, key, fill),
         f"{'filled ' if fill else ''}ellipse {key!r}",
+        show,
     )
 
 
 def draw_fill(
-    path: str | Path, x: int, y: int, key: str, diagonal: bool = False, frame: FrameRef = 0, layer: LayerRef = None
+    path: str | Path,
+    x: int,
+    y: int,
+    key: str,
+    diagonal: bool = False,
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     return _edit(
-        path, frame, layer, lambda l, s: ops.flood_fill(l, s.palette, x, y, key, diagonal), f"fill {key!r}"
+        path, frame, layer, lambda l, s: ops.flood_fill(l, s.palette, x, y, key, diagonal), f"fill {key!r}", show
     )
 
 
-def draw_replace(path: str | Path, old: str, new: str, frame: FrameRef = ALL, layer: LayerRef = None) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.replace(l, s.palette, old, new), f"replace {old!r}->{new!r}")
+def replace_mapping(old: str | None, new: str | None, mapping: dict[str, str] | None = None) -> dict[str, str]:
+    """Build the key mapping for :func:`draw_replace`.
+
+    Either ``mapping`` (``{"g": "r", "G": "R"}``) or ``old``/``new`` strings of
+    equal length whose characters pair up (``"gGl"`` -> ``"rRw"``).
+    """
+    out: dict[str, str] = {}
+    if old or new:
+        old, new = old or "", new or ""
+        if len(old) != len(new) or not old:
+            raise SpriteError(f"old and new must be non-empty and the same length ({old!r} vs {new!r})")
+        for o, n in zip(old, new):
+            if o in out and out[o] != n:
+                raise SpriteError(f"key {o!r} is mapped twice ({out[o]!r} and {n!r})")
+            out[o] = n
+    for o, n in (mapping or {}).items():
+        if o in out and out[o] != n:
+            raise SpriteError(f"key {o!r} is mapped twice ({out[o]!r} and {n!r})")
+        out[o] = n
+    if not out:
+        raise SpriteError("replace needs old/new keys or a mapping")
+    return out
 
 
-def draw_clear(path: str | Path, frame: FrameRef = 0, layer: LayerRef = None, region: Region = None) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.clear(l, region), "clear" + _region_str(region))
+def draw_replace(
+    path: str | Path,
+    old: str | None = None,
+    new: str | None = None,
+    frame: FrameRef = ALL,
+    layer: LayerRef = None,
+    region: Region = None,
+    show: str = SHOW_DEFAULT,
+    mapping: dict[str, str] | None = None,
+) -> str:
+    """Recolor: replace keys in one pass. ``old``/``new`` may be several
+    characters each (``"gGl"`` -> ``"rRw"``) or use ``mapping``; all pairs are
+    applied simultaneously so ``g<->G`` swaps work."""
+    m = replace_mapping(old, new, mapping)
+    desc = ",".join(f"{o!r}->{n!r}" for o, n in m.items())
+    return _edit(
+        path,
+        frame,
+        layer,
+        lambda l, s: ops.replace_map(l, s.palette, m, region),
+        f"replace {desc}{_region_str(region)}",
+        show,
+    )
+
+
+def draw_clear(
+    path: str | Path,
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    region: Region = None,
+    keys: Keys = None,
+    show: str = SHOW_DEFAULT,
+) -> str:
+    return _edit(
+        path, frame, layer, lambda l, s: ops.clear(l, region, keys), "clear" + _region_str(region) + _keys_str(keys), show
+    )
 
 
 def draw_copy(
@@ -425,19 +586,107 @@ def draw_copy(
     from_layer: LayerRef = None,
     to_layer: LayerRef = None,
     overwrite: bool = False,
+    keys: Keys = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     """Copy a region of one frame/layer onto (x, y) of another (or the same)."""
+    return _move_region(
+        path, region, x, y, from_frame, to_frame, from_layer, to_layer, overwrite, keys, show, cut=False
+    )
+
+
+def draw_cut(
+    path: str | Path,
+    to_layer: LayerRef,
+    keys: Keys = None,
+    region: Region = None,
+    x: int | None = None,
+    y: int | None = None,
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    to_frame: FrameRef | None = None,
+    overwrite: bool = False,
+    show: str = SHOW_DEFAULT,
+) -> str:
+    """Move pixels (all, or only those with ``keys``, or only inside ``region``)
+    from ``layer`` to ``to_layer`` in one call; the source pixels are erased.
+
+    Without ``x``/``y`` the pixels keep their position, which is how you split
+    a prop (staff, weapon, shadow) off onto its own layer after the fact.
+    ``frame`` may be a list or "all"; the cut then happens within each frame
+    unless ``to_frame`` names a single destination frame.
+    """
+    return _move_region(
+        path, region, x, y, frame, to_frame, layer, to_layer, overwrite, keys, show, cut=True
+    )
+
+
+def _move_region(
+    path: str | Path,
+    region: Region,
+    x: int | None,
+    y: int | None,
+    from_frame: FrameRef,
+    to_frame: FrameRef | None,
+    from_layer: LayerRef,
+    to_layer: LayerRef,
+    overwrite: bool,
+    keys: Keys,
+    show: str,
+    cut: bool,
+) -> str:
+    mode = view.show_mode(show)
     sprite = Sprite.load(path)
-    src_fi = sprite.frame_index(from_frame)
-    src = _target_layer(sprite, src_fi, from_layer)
-    dst_frames = _target_frames(sprite, to_frame)
+    src_frames = _target_frames(sprite, from_frame)
+    dst_layer_ref = to_layer if to_layer is not None else from_layer
+    if x is None or y is None:
+        # default: same position as the region's top-left
+        bx, by, _, _ = ops._box(_target_layer(sprite, src_frames[0], from_layer), region)
+        x = bx if x is None else x
+        y = by if y is None else y
+    pairs: list[tuple[int, int]]
+    if to_frame is None:
+        pairs = [(fi, fi) for fi in src_frames]  # within each frame
+    else:
+        dst_frames = _target_frames(sprite, to_frame)
+        if len(src_frames) == 1:
+            pairs = [(src_frames[0], fi) for fi in dst_frames]  # one source -> many destinations
+        elif len(dst_frames) == 1:
+            pairs = [(fi, dst_frames[0]) for fi in src_frames]  # many sources -> one destination
+        elif len(src_frames) == len(dst_frames):
+            pairs = list(zip(src_frames, dst_frames))
+        else:
+            raise SpriteError(
+                f"cannot pair {len(src_frames)} source frames with {len(dst_frames)} destination frames"
+            )
+    view_fi = pairs[0][1]
+    first_dst = _target_layer(sprite, view_fi, dst_layer_ref)
+    before = [row[:] for row in first_dst.grid]
     total = 0
-    for fi in dst_frames:
-        dst = _target_layer(sprite, fi, to_layer if to_layer is not None else from_layer)
-        total += ops.copy_region(src, dst, region, x, y, overwrite)
+    for sf, df in pairs:
+        src = _target_layer(sprite, sf, from_layer)
+        dst = _target_layer(sprite, df, dst_layer_ref)
+        if cut:
+            if src is dst and (x, y) == ops._box(src, region)[:2]:
+                raise SpriteError("cut needs a different layer/frame or an offset (x, y); use draw_copy otherwise")
+            total += ops.cut_region(src, dst, region, x, y, overwrite, keys)
+        else:
+            total += ops.copy_region(src, dst, region, x, y, overwrite, keys)
     sprite.save(path)
-    msg = f"copy{_region_str(region)} from frame {src_fi} -> ({x},{y}): {total} pixels affected in {len(dst_frames)} frame(s)"
-    return msg + "\n" + view.frame_text(sprite, dst_frames[0], to_layer if to_layer is not None else from_layer)
+    what = "cut" if cut else "copy"
+    dst_desc = _frames_str([df for _, df in pairs])
+    if to_layer is not None and to_layer != from_layer:
+        dst_desc += f" layer {first_dst.name!r}"
+    msg = (
+        f"{what}{_region_str(region)}{_keys_str(keys)} from {_frames_str([sf for sf, _ in pairs])}"
+        f" -> ({x},{y}) {dst_desc}: {total} pixels affected"
+    )
+    body = view.edit_result_text(sprite, view_fi, dst_layer_ref, before, first_dst, mode)
+    if body:
+        msg += "\n" + body
+    if len(pairs) > 1 and mode != "none":
+        msg += f"\n(+{len(pairs) - 1} more frame(s) changed; use show to inspect)"
+    return msg
 
 
 def draw_paste(
@@ -448,6 +697,7 @@ def draw_paste(
     overwrite: bool = False,
     frame: FrameRef = 0,
     layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     return _edit(
         path,
@@ -455,11 +705,14 @@ def draw_paste(
         layer,
         lambda l, s: ops.paste(l, s.palette, grid, x, y, skip_transparent=not overwrite),
         f"paste at ({x},{y})",
+        show,
     )
 
 
-def draw_set(path: str | Path, grid: str, frame: FrameRef = 0, layer: LayerRef = None) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.set_grid(l, s.palette, grid), "set grid")
+def draw_set(
+    path: str | Path, grid: str, frame: FrameRef = 0, layer: LayerRef = None, show: str = SHOW_DEFAULT
+) -> str:
+    return _edit(path, frame, layer, lambda l, s: ops.set_grid(l, s.palette, grid), "set grid", show)
 
 
 def draw_outline(
@@ -469,6 +722,7 @@ def draw_outline(
     frame: FrameRef = 0,
     layer: LayerRef = None,
     outer_only: bool = False,
+    show: str = SHOW_DEFAULT,
 ) -> str:
     return _edit(
         path,
@@ -476,6 +730,7 @@ def draw_outline(
         layer,
         lambda l, s: ops.outline(l, s.palette, key, diagonal, outer_only),
         f"{'outer ' if outer_only else ''}outline {key!r}",
+        show,
     )
 
 
@@ -484,12 +739,23 @@ def draw_outline(
 # --------------------------------------------------------------------------- #
 
 
-def flip(path: str | Path, axis: str, frame: FrameRef = 0, layer: LayerRef = None, region: Region = None) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.flip(l, axis, region), f"flip {axis}{_region_str(region)}")
+def flip(
+    path: str | Path,
+    axis: str,
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    region: Region = None,
+    show: str = SHOW_DEFAULT,
+) -> str:
+    return _edit(
+        path, frame, layer, lambda l, s: ops.flip(l, axis, region), f"flip {axis}{_region_str(region)}", show
+    )
 
 
-def rotate(path: str | Path, turns: int = 1, frame: FrameRef = 0, layer: LayerRef = None) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.rotate(l, turns), f"rotate {turns * 90}°")
+def rotate(
+    path: str | Path, turns: int = 1, frame: FrameRef = 0, layer: LayerRef = None, show: str = SHOW_DEFAULT
+) -> str:
+    return _edit(path, frame, layer, lambda l, s: ops.rotate(l, turns), f"rotate {turns * 90}°", show)
 
 
 def shift(
@@ -500,16 +766,58 @@ def shift(
     frame: FrameRef = 0,
     layer: LayerRef = None,
     region: Region = None,
+    keys: Keys = None,
+    show: str = SHOW_DEFAULT,
+    overwrite: bool = False,
 ) -> str:
+    """Translate content. Moved pixels merge into the landing area unless
+    ``overwrite`` (then the box's transparent pixels move too and replace
+    what they land on)."""
     return _edit(
-        path, frame, layer, lambda l, s: ops.shift(l, dx, dy, wrap, region), f"shift ({dx},{dy}){_region_str(region)}"
+        path,
+        frame,
+        layer,
+        lambda l, s: ops.shift(l, dx, dy, wrap, region, keys, overwrite),
+        f"shift ({dx},{dy}){_region_str(region)}{_keys_str(keys)}{' overwrite' if overwrite else ''}",
+        show,
+    )
+
+
+def stretch(
+    path: str | Path,
+    region: Region = None,
+    dx: int = 0,
+    dy: int = 0,
+    anchor: str = "bottom",
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
+) -> str:
+    """Squash/stretch a region by ``dx`` columns and ``dy`` rows (nearest
+    neighbour), keeping the ``anchor`` edge in place (default ``bottom``: feet
+    planted, centred horizontally). See :func:`ops.stretch`."""
+    anchor = normalize_anchor(anchor)
+    if dx == 0 and dy == 0:
+        raise SpriteError("stretch needs a non-zero dx and/or dy")
+    return _edit(
+        path,
+        frame,
+        layer,
+        lambda l, s: ops.stretch(l, region, dx, dy, anchor),
+        f"stretch ({dx:+d},{dy:+d}){_region_str(region)} anchor {anchor}",
+        show,
     )
 
 
 def mirror(
-    path: str | Path, axis: str = "h", source: str = "first", frame: FrameRef = 0, layer: LayerRef = None
+    path: str | Path,
+    axis: str = "h",
+    source: str = "first",
+    frame: FrameRef = 0,
+    layer: LayerRef = None,
+    show: str = SHOW_DEFAULT,
 ) -> str:
-    return _edit(path, frame, layer, lambda l, s: ops.mirror(l, axis, source), f"mirror {axis} from {source}")
+    return _edit(path, frame, layer, lambda l, s: ops.mirror(l, axis, source), f"mirror {axis} from {source}", show)
 
 
 # --------------------------------------------------------------------------- #
@@ -588,14 +896,30 @@ def import_png(
     frame_height: int | None = None,
     max_colors: int = 32,
     palette_from: str | Path | None = None,
+    metadata: str | Path | None = None,
 ) -> str:
+    """Import a PNG (or sheet) into a new sprite file.
+
+    Sheet metadata (the ``.json`` written by ``export_sheet``) restores frame
+    names, durations, tags and the palette. It is read from ``metadata`` if
+    given, otherwise from ``<png>.json`` next to the image when that exists.
+    """
     p = Path(out)
     if p.exists():
         raise SpriteError(f"{p} already exists")
-    sprite = render.import_png(png, name, _palette_from(palette_from), max_colors, frame_width, frame_height)
+    meta = render.load_sheet_metadata(png, metadata)
+    sprite = render.import_png(
+        png, name, _palette_from(palette_from), max_colors, frame_width, frame_height, meta
+    )
     p.parent.mkdir(parents=True, exist_ok=True)
     sprite.save(p)
-    return f"imported {png} -> {p}\n" + view.info_text(sprite)
+    msg = f"imported {png} -> {p}"
+    if meta is not None:
+        msg += f"\nmetadata: {meta.path} (frame names, durations, {len(sprite.tags)} tag(s)"
+        msg += ", palette)" if meta.palette and palette_from in (None, "") else ")"
+        if meta.notes:
+            msg += "\n" + "\n".join(f"  note: {n}" for n in meta.notes)
+    return msg + "\n" + view.info_text(sprite)
 
 
 def render_bytes(

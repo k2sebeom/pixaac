@@ -21,9 +21,11 @@ app = typer.Typer(
 )
 
 FileArg = Annotated[Path, typer.Argument(help="sprite file (.sprite.json)")]
-FrameOpt = Annotated[str, typer.Option("--frame", "-f", help="frame index/name, or 'all'")]
+FrameOpt = Annotated[str, typer.Option("--frame", "-f", help="frame index/name, 'all', a range '0..2' or a list '1,3'")]
 LayerOpt = Annotated[Optional[str], typer.Option("--layer", "-l", help="layer index/name (default: 0)")]
 KeyArg = Annotated[str, typer.Argument(help="palette key (single character)")]
+ShowOpt = Annotated[str, typer.Option("--show", help="what to print after an edit: bbox (changed box), full, none")]
+KeysOpt = Annotated[Optional[str], typer.Option("--keys", "-k", help="only pixels with these palette keys, e.g. 'ow'")]
 
 
 def _run(fn: Callable[[], str]) -> None:
@@ -76,15 +78,22 @@ def show(
     all_frames: Annotated[bool, typer.Option("--all", "-a", help="show every frame")] = False,
     no_ruler: Annotated[bool, typer.Option("--no-ruler", help="omit coordinate rulers")] = False,
     onion: Annotated[Optional[str], typer.Option("--onion", "-o", help="ghost another frame underneath: 'prev', 'next', index or name")] = None,
+    onion_layer: Annotated[Optional[str], typer.Option("--onion-layer", help="layer of the ghost frame (default: same as --layer), or 'composite'")] = None,
 ) -> None:
     """Print a frame (composite, or a single layer) as a text grid."""
-    _run(lambda: api.show(file, frame, layer, all_frames, ruler=not no_ruler, onion=onion))
+    _run(lambda: api.show(file, frame, layer, all_frames, ruler=not no_ruler, onion=onion, onion_layer=onion_layer))
 
 
 @app.command()
-def diff(file: FileArg, a: str, b: str, layer: LayerOpt = None) -> None:
-    """List pixels that differ between two frames."""
-    _run(lambda: api.diff(file, a, b, layer))
+def diff(
+    file: FileArg,
+    a: str,
+    b: str,
+    layer: LayerOpt = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="also list up to N '(x,y): a -> b' lines (-1 = all; default: grid only)")] = 0,
+) -> None:
+    """Show how frame B differs from frame A: counts, bbox and a grid of B's keys where they differ."""
+    _run(lambda: api.diff(file, a, b, layer, limit))
 
 
 @app.command()
@@ -99,9 +108,10 @@ def resize(
     width: int,
     height: int,
     anchor: Annotated[str, typer.Option(help="top-left, top, top-right, left, center, right, bottom-left, bottom, bottom-right")] = "top-left",
+    show: Annotated[str, typer.Option("--show", help="what to print afterwards: bbox (content box of frame 0), full, none")] = "bbox",
 ) -> None:
     """Resize the canvas (crop or pad with transparent)."""
-    _run(lambda: api.resize(file, width, height, anchor))
+    _run(lambda: api.resize(file, width, height, anchor, show))
 
 
 @app.command()
@@ -190,9 +200,10 @@ def frame_add(
     duration: Annotated[int, typer.Option("--duration", "-d", help="milliseconds")] = 100,
     copy: Annotated[Optional[str], typer.Option("--copy", "-c", help="duplicate this frame")] = None,
     at: Annotated[Optional[int], typer.Option(help="insert position (default: append)")] = None,
+    count: Annotated[int, typer.Option("--count", "-n", help="add this many frames (named NAME0, NAME1, ... if NAME is given)")] = 1,
 ) -> None:
-    """Append (or insert) a frame, optionally duplicating an existing one."""
-    _run(lambda: api.frame_add(file, name, duration, copy, at))
+    """Append (or insert) one or more frames, optionally duplicating an existing one."""
+    _run(lambda: api.frame_add(file, name, duration, copy, at, count))
 
 
 @frame_app.command("rm")
@@ -325,6 +336,7 @@ def draw_pixel(
     points: Annotated[list[str], typer.Argument(help="X,Y pairs, e.g. 3,4 5,4")],
     frame: FrameOpt = "0",
     layer: LayerOpt = None,
+    show: ShowOpt = "bbox",
 ) -> None:
     """Set individual pixels."""
 
@@ -336,60 +348,72 @@ def draw_pixel(
             except ValueError:
                 raise SpriteError(f"expected X,Y, got {p!r}") from None
             pts.append((x, y))
-        return api.draw_pixels(file, pts, key, frame, layer)
+        return api.draw_pixels(file, pts, key, frame, layer, show)
 
     _run(go)
 
 
 @draw_app.command("line")
-def draw_line(file: FileArg, x0: int, y0: int, x1: int, y1: int, key: KeyArg, frame: FrameOpt = "0", layer: LayerOpt = None) -> None:
+def draw_line(
+    file: FileArg, x0: int, y0: int, x1: int, y1: int, key: KeyArg, frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox"
+) -> None:
     """Draw a 1px line between two points."""
-    _run(lambda: api.draw_line(file, x0, y0, x1, y1, key, frame, layer))
+    _run(lambda: api.draw_line(file, x0, y0, x1, y1, key, frame, layer, show))
 
 
 @draw_app.command("rect")
 def draw_rect(
     file: FileArg, x0: int, y0: int, x1: int, y1: int, key: KeyArg,
     fill: Annotated[bool, typer.Option("--fill")] = False,
-    frame: FrameOpt = "0", layer: LayerOpt = None,
+    frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox",
 ) -> None:
     """Draw a rectangle (outline, or --fill)."""
-    _run(lambda: api.draw_rect(file, x0, y0, x1, y1, key, fill, frame, layer))
+    _run(lambda: api.draw_rect(file, x0, y0, x1, y1, key, fill, frame, layer, show))
 
 
 @draw_app.command("ellipse")
 def draw_ellipse(
     file: FileArg, x0: int, y0: int, x1: int, y1: int, key: KeyArg,
     fill: Annotated[bool, typer.Option("--fill")] = False,
-    frame: FrameOpt = "0", layer: LayerOpt = None,
+    frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox",
 ) -> None:
     """Draw an ellipse inside a bounding box (outline, or --fill)."""
-    _run(lambda: api.draw_ellipse(file, x0, y0, x1, y1, key, fill, frame, layer))
+    _run(lambda: api.draw_ellipse(file, x0, y0, x1, y1, key, fill, frame, layer, show))
 
 
 @draw_app.command("fill")
 def draw_fill(
     file: FileArg, x: int, y: int, key: KeyArg,
     diagonal: Annotated[bool, typer.Option("--diagonal", help="8-connected fill")] = False,
-    frame: FrameOpt = "0", layer: LayerOpt = None,
+    frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox",
 ) -> None:
     """Flood-fill the region containing (x, y)."""
-    _run(lambda: api.draw_fill(file, x, y, key, diagonal, frame, layer))
-
-
-@draw_app.command("replace")
-def draw_replace(file: FileArg, old: str, new: str, frame: FrameOpt = "all", layer: LayerOpt = None) -> None:
-    """Replace one key with another (all frames by default)."""
-    _run(lambda: api.draw_replace(file, old, new, frame, layer))
+    _run(lambda: api.draw_fill(file, x, y, key, diagonal, frame, layer, show))
 
 
 RegionOpt = Annotated[Optional[str], typer.Option("--region", "-r", help="x0,y0,x1,y1 (inclusive); default whole layer")]
 
 
+@draw_app.command("replace")
+def draw_replace(
+    file: FileArg,
+    old: Annotated[str, typer.Argument(help="key(s) to replace; several characters pair up with NEW, e.g. gGl")],
+    new: Annotated[str, typer.Argument(help="replacement key(s), same length as OLD, e.g. rRw")],
+    frame: FrameOpt = "all", layer: LayerOpt = None, region: RegionOpt = None, show: ShowOpt = "bbox",
+) -> None:
+    """Recolor: replace keys (all frames by default), optionally only inside --region.
+
+    All pairs apply in one pass, so `draw replace FILE gG Gg` swaps two keys.
+    """
+    _run(lambda: api.draw_replace(file, old, new, frame, layer, api.parse_region(region), show))
+
+
 @draw_app.command("clear")
-def draw_clear(file: FileArg, frame: FrameOpt = "0", layer: LayerOpt = None, region: RegionOpt = None) -> None:
-    """Erase a layer (or a region of it)."""
-    _run(lambda: api.draw_clear(file, frame, layer, api.parse_region(region)))
+def draw_clear(
+    file: FileArg, frame: FrameOpt = "0", layer: LayerOpt = None, region: RegionOpt = None, keys: KeysOpt = None, show: ShowOpt = "bbox"
+) -> None:
+    """Erase a layer (or a region of it, or only some keys)."""
+    _run(lambda: api.draw_clear(file, frame, layer, api.parse_region(region), keys, show))
 
 
 @draw_app.command("copy")
@@ -402,15 +426,48 @@ def draw_copy(
     from_layer: Annotated[Optional[str], typer.Option("--from-layer", "-l")] = None,
     to_layer: Annotated[Optional[str], typer.Option("--to-layer")] = None,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="also copy transparent pixels")] = False,
+    keys: KeysOpt = None,
+    show: ShowOpt = "bbox",
 ) -> None:
     """Copy a region (inclusive box) onto another position, frame or layer."""
 
     def go() -> str:
-        try:
-            tx, ty = (int(v) for v in to.split(","))
-        except ValueError:
-            raise SpriteError(f"--to expects X,Y, got {to!r}") from None
-        return api.draw_copy(file, (x0, y0, x1, y1), tx, ty, from_frame, to_frame, from_layer, to_layer, overwrite)
+        return api.draw_copy(
+            file, (x0, y0, x1, y1), *_parse_xy(to, "--to"), from_frame, to_frame, from_layer, to_layer, overwrite, keys, show
+        )
+
+    _run(go)
+
+
+def _parse_xy(text: str, what: str) -> tuple[int, int]:
+    try:
+        x, y = (int(v) for v in text.split(","))
+    except ValueError:
+        raise SpriteError(f"{what} expects X,Y, got {text!r}") from None
+    return x, y
+
+
+@draw_app.command("cut")
+def draw_cut(
+    file: FileArg,
+    to_layer: Annotated[str, typer.Argument(help="destination layer index/name")],
+    keys: KeysOpt = None,
+    region: RegionOpt = None,
+    to: Annotated[Optional[str], typer.Option("--to", help="new top-left X,Y (default: keep position)")] = None,
+    frame: FrameOpt = "0",
+    layer: LayerOpt = None,
+    to_frame: Annotated[Optional[str], typer.Option("--to-frame", "-t", help="destination frame (default: same frame)")] = None,
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="also move transparent pixels")] = False,
+    show: ShowOpt = "bbox",
+) -> None:
+    """Move pixels (all, --keys, and/or --region) from one layer to another; the source is erased.
+
+    Example: `draw cut hero.sprite.json staff --keys ow -f all` splits the staff onto its own layer.
+    """
+
+    def go() -> str:
+        x, y = _parse_xy(to, "--to") if to is not None else (None, None)
+        return api.draw_cut(file, to_layer, keys, api.parse_region(region), x, y, frame, layer, to_frame, overwrite, show)
 
     _run(go)
 
@@ -425,9 +482,10 @@ def draw_paste(
     overwrite: Annotated[bool, typer.Option("--overwrite", help="also paste transparent pixels")] = False,
     frame: FrameOpt = "0",
     layer: LayerOpt = None,
+    show: ShowOpt = "bbox",
 ) -> None:
     """Stamp a grid of keys at (x, y). Transparent '.' pixels are skipped unless --overwrite."""
-    _run(lambda: api.draw_paste(file, _read_grid(grid, grid_file), x, y, overwrite, frame, layer))
+    _run(lambda: api.draw_paste(file, _read_grid(grid, grid_file), x, y, overwrite, frame, layer, show))
 
 
 @draw_app.command("set")
@@ -437,9 +495,10 @@ def draw_set(
     grid_file: Annotated[Optional[Path], typer.Option("--file")] = None,
     frame: FrameOpt = "0",
     layer: LayerOpt = None,
+    show: ShowOpt = "bbox",
 ) -> None:
     """Replace the whole layer with a grid (short rows are padded with '.')."""
-    _run(lambda: api.draw_set(file, _read_grid(grid, grid_file), frame, layer))
+    _run(lambda: api.draw_set(file, _read_grid(grid, grid_file), frame, layer, show))
 
 
 @draw_app.command("outline")
@@ -447,10 +506,10 @@ def draw_outline(
     file: FileArg, key: KeyArg,
     diagonal: Annotated[bool, typer.Option("--diagonal", help="also fill diagonal gaps")] = False,
     outer: Annotated[bool, typer.Option("--outer", help="skip enclosed gaps; outline only the outside")] = False,
-    frame: FrameOpt = "0", layer: LayerOpt = None,
+    frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox",
 ) -> None:
     """Add a 1px outline around all non-transparent pixels."""
-    _run(lambda: api.draw_outline(file, key, diagonal, frame, layer, outer))
+    _run(lambda: api.draw_outline(file, key, diagonal, frame, layer, outer, show))
 
 
 # --------------------------------------------------------------------------- #
@@ -462,21 +521,51 @@ app.add_typer(tf_app, name="transform")
 
 
 @tf_app.command("flip")
-def tf_flip(file: FileArg, axis: Annotated[str, typer.Argument(help="h or v")], frame: FrameOpt = "0", layer: LayerOpt = None, region: RegionOpt = None) -> None:
+def tf_flip(
+    file: FileArg, axis: Annotated[str, typer.Argument(help="h or v")], frame: FrameOpt = "0", layer: LayerOpt = None,
+    region: RegionOpt = None, show: ShowOpt = "bbox",
+) -> None:
     """Flip horizontally (h) or vertically (v), optionally only a region."""
-    _run(lambda: api.flip(file, axis, frame, layer, api.parse_region(region)))
+    _run(lambda: api.flip(file, axis, frame, layer, api.parse_region(region), show))
 
 
 @tf_app.command("rotate")
-def tf_rotate(file: FileArg, turns: Annotated[int, typer.Option(help="90° clockwise steps")] = 1, frame: FrameOpt = "0", layer: LayerOpt = None) -> None:
+def tf_rotate(
+    file: FileArg, turns: Annotated[int, typer.Option(help="90° clockwise steps")] = 1, frame: FrameOpt = "0", layer: LayerOpt = None,
+    show: ShowOpt = "bbox",
+) -> None:
     """Rotate a square layer by 90° steps."""
-    _run(lambda: api.rotate(file, turns, frame, layer))
+    _run(lambda: api.rotate(file, turns, frame, layer, show))
 
 
 @tf_app.command("shift")
-def tf_shift(file: FileArg, dx: int, dy: int, wrap: Annotated[bool, typer.Option("--wrap")] = False, frame: FrameOpt = "0", layer: LayerOpt = None, region: RegionOpt = None) -> None:
-    """Translate content by (dx, dy). With --region only pixels inside the box move."""
-    _run(lambda: api.shift(file, dx, dy, wrap, frame, layer, api.parse_region(region)))
+def tf_shift(
+    file: FileArg, dx: int, dy: int, wrap: Annotated[bool, typer.Option("--wrap")] = False, frame: FrameOpt = "0", layer: LayerOpt = None,
+    region: RegionOpt = None, keys: KeysOpt = None, show: ShowOpt = "bbox",
+    overwrite: Annotated[bool, typer.Option("--overwrite", help="moved transparent pixels replace what they land on (default: merge)")] = False,
+) -> None:
+    """Translate content by (dx, dy). With --region only pixels inside the box move; with --keys only those keys.
+
+    Moved pixels merge into the landing area unless --overwrite. Use -f 1,3 to apply the
+    same shift to several frames at once. For squash-and-stretch see `transform stretch`.
+    """
+    _run(lambda: api.shift(file, dx, dy, wrap, frame, layer, api.parse_region(region), keys, show, overwrite))
+
+
+@tf_app.command("stretch")
+def tf_stretch(
+    file: FileArg,
+    dx: Annotated[int, typer.Option("--dx", help="columns to add (negative: remove)")] = 0,
+    dy: Annotated[int, typer.Option("--dy", help="rows to add (negative: remove)")] = 0,
+    region: RegionOpt = None,
+    anchor: Annotated[str, typer.Option(help="edge that stays put: bottom (default), top, center, top-left, ...")] = "bottom",
+    frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox",
+) -> None:
+    """Squash or stretch a region (default: whole layer) by --dx columns / --dy rows, nearest neighbour.
+
+    Example: `transform stretch FILE -r 2,5,21,20 --dy -2 -f squash` squashes the body onto its feet.
+    """
+    _run(lambda: api.stretch(file, api.parse_region(region), dx, dy, anchor, frame, layer, show))
 
 
 @tf_app.command("mirror")
@@ -484,10 +573,10 @@ def tf_mirror(
     file: FileArg,
     axis: Annotated[str, typer.Option(help="h (left->right) or v (top->bottom)")] = "h",
     source: Annotated[str, typer.Option(help="which half to keep: first or second")] = "first",
-    frame: FrameOpt = "0", layer: LayerOpt = None,
+    frame: FrameOpt = "0", layer: LayerOpt = None, show: ShowOpt = "bbox",
 ) -> None:
     """Make the layer symmetric by copying one half onto the other."""
-    _run(lambda: api.mirror(file, axis, source, frame, layer))
+    _run(lambda: api.mirror(file, axis, source, frame, layer, show))
 
 
 # --------------------------------------------------------------------------- #
@@ -549,9 +638,14 @@ def import_cmd(
     frame_height: Annotated[Optional[int], typer.Option(help="slice sheet into frames of this height")] = None,
     max_colors: Annotated[int, typer.Option(help="quantize to at most this many colors")] = 32,
     palette_from: Annotated[Optional[Path], typer.Option("--palette-from", help="reuse the palette (keys and colors) of this sprite file")] = None,
+    metadata: Annotated[Optional[Path], typer.Option("--metadata", "-m", help="sheet JSON (as written by `export sheet`); default: <png>.json if present")] = None,
 ) -> None:
-    """Import a PNG (or sheet) into a new sprite file."""
-    _run(lambda: api.import_png(png, out, name, frame_width, frame_height, max_colors, palette_from))
+    """Import a PNG (or sheet) into a new sprite file.
+
+    Sheet metadata next to the PNG (or --metadata) restores frame rectangles, names,
+    durations, tags and the palette.
+    """
+    _run(lambda: api.import_png(png, out, name, frame_width, frame_height, max_colors, palette_from, metadata))
 
 
 # --------------------------------------------------------------------------- #

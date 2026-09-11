@@ -10,7 +10,7 @@ from collections import deque
 
 from PIL import Image, ImageDraw
 
-from .model import TRANSPARENT_KEY, Layer, Palette, SpriteError, parse_grid
+from .model import TRANSPARENT_KEY, Layer, Palette, SpriteError, anchor_offset, parse_grid
 
 
 Region = tuple[int, int, int, int] | list[int] | None
@@ -43,6 +43,15 @@ def _box(layer: Layer, region: Region) -> tuple[int, int, int, int]:
 def _extract(layer: Layer, box: tuple[int, int, int, int]) -> list[list[str]]:
     x0, y0, x1, y1 = box
     return [row[x0 : x1 + 1] for row in layer.grid[y0 : y1 + 1]]
+
+
+Keys = str | None
+"""Set of palette keys (as a string) an operation is restricted to, or ``None`` for all."""
+
+
+def _selected(ch: str, keys: Keys) -> bool:
+    """Whether a pixel with key ``ch`` is part of the selection ``keys``."""
+    return keys is None or ch in keys
 
 
 # --------------------------------------------------------------------------- #
@@ -164,26 +173,46 @@ def flood_fill(layer: Layer, palette: Palette, x: int, y: int, key: str, diagona
     return n
 
 
-def replace(layer: Layer, palette: Palette, old: str, new: str) -> int:
-    """Replace every pixel with key ``old`` by ``new``."""
-    _check_key(palette, new)
-    n = 0
-    for row in layer.grid:
-        for i, ch in enumerate(row):
-            if ch == old:
-                row[i] = new
-                n += 1
-    return n
+def replace(layer: Layer, palette: Palette, old: str, new: str, region: Region = None) -> int:
+    """Replace every pixel with key ``old`` by ``new`` (optionally only inside ``region``)."""
+    return replace_map(layer, palette, {old: new}, region)
 
 
-def clear(layer: Layer, region: Region = None) -> int:
-    """Erase the layer (or just ``region``) to transparent."""
+def replace_map(layer: Layer, palette: Palette, mapping: dict[str, str], region: Region = None) -> int:
+    """Apply several key replacements at once (``{"g": "r", "G": "R"}``).
+
+    All pairs are applied simultaneously, so swaps like ``{"a": "b", "b": "a"}``
+    work. Returns the number of pixels that changed.
+    """
+    if not mapping:
+        raise SpriteError("replace needs at least one old->new pair")
+    for old, new in mapping.items():
+        if len(old) != 1:
+            raise SpriteError(f"replace keys must be single characters, got {old!r}")
+        _check_key(palette, new)
     x0, y0, x1, y1 = _box(layer, region)
     n = 0
     for y in range(y0, y1 + 1):
         row = layer.grid[y]
         for x in range(x0, x1 + 1):
-            if row[x] != TRANSPARENT_KEY:
+            new = mapping.get(row[x])
+            if new is not None and new != row[x]:
+                row[x] = new
+                n += 1
+    return n
+
+
+def clear(layer: Layer, region: Region = None, keys: Keys = None) -> int:
+    """Erase the layer (or just ``region``) to transparent.
+
+    With ``keys`` only pixels whose key is in that string are erased.
+    """
+    x0, y0, x1, y1 = _box(layer, region)
+    n = 0
+    for y in range(y0, y1 + 1):
+        row = layer.grid[y]
+        for x in range(x0, x1 + 1):
+            if row[x] != TRANSPARENT_KEY and _selected(row[x], keys):
                 n += 1
                 row[x] = TRANSPARENT_KEY
     return n
@@ -196,16 +225,49 @@ def copy_region(
     x: int,
     y: int,
     overwrite: bool = False,
+    keys: Keys = None,
 ) -> int:
     """Copy ``region`` of ``src`` so its top-left lands at (x, y) on ``dst``.
 
     ``src`` and ``dst`` may be the same layer. Transparent source pixels are
-    skipped unless ``overwrite``.
+    skipped unless ``overwrite``. With ``keys`` only pixels whose key is in
+    that string are copied (``overwrite`` then only applies to keys that
+    include ``.``).
     """
     sub = [row[:] for row in _extract(src, _box(src, region))]
     n = 0
     for dy, row in enumerate(sub):
         for dx, ch in enumerate(row):
+            if not _selected(ch, keys):
+                continue
+            if ch == TRANSPARENT_KEY and not overwrite:
+                continue
+            n += dst.set(x + dx, y + dy, ch)
+    return n
+
+
+def cut_region(
+    src: Layer,
+    dst: Layer,
+    region: Region,
+    x: int,
+    y: int,
+    overwrite: bool = False,
+    keys: Keys = None,
+) -> int:
+    """Move (copy then erase) ``region`` of ``src`` onto (x, y) of ``dst``.
+
+    Typical use: split the pixels of some keys off onto their own layer with
+    ``keys`` and no offset. Returns the number of pixels moved.
+    """
+    box = _box(src, region)
+    sub = [row[:] for row in _extract(src, box)]
+    clear(src, box, keys)
+    n = 0
+    for dy, row in enumerate(sub):
+        for dx, ch in enumerate(row):
+            if not _selected(ch, keys):
+                continue
             if ch == TRANSPARENT_KEY and not overwrite:
                 continue
             n += dst.set(x + dx, y + dy, ch)
@@ -244,13 +306,21 @@ def paste(
 
 
 def set_grid(layer: Layer, palette: Palette, text: str) -> int:
-    """Replace the whole layer with the given grid (must fit the canvas)."""
+    """Replace the whole layer with the given grid (must fit the canvas).
+
+    Returns the number of pixels whose key actually changed.
+    """
     grid = parse_grid(text, layer.width, layer.height)
     for row in grid:
         for ch in row:
             _check_key(palette, ch)
+    n = _count_diff(layer.grid, grid)
     layer.grid = grid
-    return layer.width * layer.height
+    return n
+
+
+def _count_diff(a: list[list[str]], b: list[list[str]]) -> int:
+    return sum(1 for ra, rb in zip(a, b) for ca, cb in zip(ra, rb) if ca != cb)
 
 
 # --------------------------------------------------------------------------- #
@@ -259,7 +329,10 @@ def set_grid(layer: Layer, palette: Palette, text: str) -> int:
 
 
 def flip(layer: Layer, axis: str, region: Region = None) -> int:
-    """Flip the layer (or just ``region``) horizontally or vertically."""
+    """Flip the layer (or just ``region``) horizontally or vertically.
+
+    Returns the number of pixels whose key changed (a symmetric shape reports 0).
+    """
     x0, y0, x1, y1 = _box(layer, region)
     sub = _extract(layer, (x0, y0, x1, y1))
     if axis in ("h", "horizontal", "x"):
@@ -268,35 +341,63 @@ def flip(layer: Layer, axis: str, region: Region = None) -> int:
         sub = sub[::-1]
     else:
         raise SpriteError("axis must be 'h' or 'v'")
+    n = 0
     for dy, row in enumerate(sub):
+        old = layer.grid[y0 + dy][x0 : x1 + 1]
+        n += sum(1 for a, b in zip(old, row) if a != b)
         layer.grid[y0 + dy][x0 : x1 + 1] = row
-    return (x1 - x0 + 1) * (y1 - y0 + 1)
+    return n
 
 
 def rotate(layer: Layer, turns: int = 1) -> int:
-    """Rotate by 90° clockwise ``turns`` times. Requires a square canvas."""
+    """Rotate by 90° clockwise ``turns`` times. Requires a square canvas.
+
+    Returns the number of pixels whose key changed.
+    """
     if layer.width != layer.height:
         raise SpriteError("rotate requires a square canvas (use resize first)")
+    grid = layer.grid
     for _ in range(turns % 4):
-        layer.grid = [list(r) for r in zip(*layer.grid[::-1])]
-    return layer.width * layer.height
+        grid = [list(r) for r in zip(*grid[::-1])]
+    n = _count_diff(layer.grid, grid)
+    layer.grid = grid
+    return n
 
 
-def shift(layer: Layer, dx: int, dy: int, wrap: bool = False, region: Region = None) -> int:
+def shift(
+    layer: Layer,
+    dx: int,
+    dy: int,
+    wrap: bool = False,
+    region: Region = None,
+    keys: Keys = None,
+    overwrite: bool = False,
+) -> int:
     """Translate the layer content by (dx, dy).
 
     With ``region`` only the pixels inside the box move; they may land outside
-    the box (overwriting what is there) but are clipped to the canvas. With
-    ``wrap`` pixels wrap around the box (or the canvas when no region).
+    the box but are clipped to the canvas. The source box is vacated, and by
+    default the moved pixels *merge* into the landing area: only where a moved
+    pixel is non-transparent is the destination overwritten, so shifting a
+    region onto existing pixels (e.g. a squash that lands the torso on the
+    feet) keeps the old pixels in the gaps. With ``overwrite`` the transparent
+    pixels of the box move too, so the box's footprint fully replaces what it
+    lands on.
+
+    With ``wrap`` pixels wrap around the box (or the canvas when no region).
+    With ``keys`` only pixels whose key is in that string move; the rest stay
+    put (``overwrite`` then only moves transparency if ``.`` is in ``keys``).
     """
     x0, y0, x1, y1 = _box(layer, region)
     bw, bh = x1 - x0 + 1, y1 - y0 + 1
     sub = [row[:] for row in _extract(layer, (x0, y0, x1, y1))]
-    clear(layer, (x0, y0, x1, y1))
+    clear(layer, (x0, y0, x1, y1), keys)
     n = 0
     for sy, row in enumerate(sub):
         for sx, ch in enumerate(row):
-            if ch == TRANSPARENT_KEY:
+            if not _selected(ch, keys):
+                continue
+            if ch == TRANSPARENT_KEY and not overwrite:
                 continue
             nx, ny = sx + dx, sy + dy
             if wrap:
@@ -310,6 +411,7 @@ def mirror(layer: Layer, axis: str = "h", source: str = "first") -> int:
 
     ``axis='h'`` mirrors left<->right, ``'v'`` top<->bottom. ``source`` is which
     half is kept: ``'first'`` (left/top) or ``'second'`` (right/bottom).
+    Returns the number of pixels whose key changed.
     """
     w, h = layer.width, layer.height
     n = 0
@@ -317,22 +419,50 @@ def mirror(layer: Layer, axis: str = "h", source: str = "first") -> int:
         for y in range(h):
             for x in range(w // 2):
                 mx = w - 1 - x
-                if source == "first":
-                    layer.grid[y][mx] = layer.grid[y][x]
-                else:
-                    layer.grid[y][x] = layer.grid[y][mx]
-                n += 1
+                src, dst = (x, mx) if source == "first" else (mx, x)
+                if layer.grid[y][dst] != layer.grid[y][src]:
+                    layer.grid[y][dst] = layer.grid[y][src]
+                    n += 1
     elif axis in ("v", "vertical", "y"):
         for y in range(h // 2):
             my = h - 1 - y
-            if source == "first":
-                layer.grid[my] = layer.grid[y][:]
-            else:
-                layer.grid[y] = layer.grid[my][:]
-            n += w
+            src, dst = (y, my) if source == "first" else (my, y)
+            n += sum(1 for a, b in zip(layer.grid[src], layer.grid[dst]) if a != b)
+            layer.grid[dst] = layer.grid[src][:]
     else:
         raise SpriteError("axis must be 'h' or 'v'")
     return n
+
+
+def stretch(layer: Layer, region: Region, dx: int = 0, dy: int = 0, anchor: str = "bottom") -> int:
+    """Grow (or shrink, negative) a region by ``dx`` columns and ``dy`` rows.
+
+    The box's content is resampled nearest-neighbour (rows/columns are
+    duplicated or dropped; the first and last row/column are always kept, so
+    an outline survives) and the result is placed so that the ``anchor`` edge
+    stays put: ``"bottom"`` (default) keeps the feet planted and centres
+    horizontally, which is what a squash-and-stretch bounce needs. The old box
+    is cleared first and the scaled box fully replaces its footprint (pixels
+    pushed off the canvas are lost). Returns the number of pixels changed.
+    """
+    x0, y0, x1, y1 = _box(layer, region)
+    ow, oh = x1 - x0 + 1, y1 - y0 + 1
+    nw, nh = ow + dx, oh + dy
+    if nw < 1 or nh < 1:
+        raise SpriteError(f"region is {ow}x{oh}; it cannot shrink by ({dx},{dy})")
+    sub = _extract(layer, (x0, y0, x1, y1))
+    # centre-sampled nearest neighbour: keeps both edges of the box
+    cols = [((2 * i + 1) * ow) // (2 * nw) for i in range(nw)]
+    rows = [((2 * j + 1) * oh) // (2 * nh) for j in range(nh)]
+    scaled = [[sub[r][c] for c in cols] for r in rows]
+    adx, ady = anchor_offset(anchor, nw, nh, ow, oh)
+    nx0, ny0 = x0 + adx, y0 + ady
+    before = [row[:] for row in layer.grid]
+    clear(layer, (x0, y0, x1, y1))
+    for j, row in enumerate(scaled):
+        for i, ch in enumerate(row):
+            layer.set(nx0 + i, ny0 + j, ch)
+    return _count_diff(before, layer.grid)
 
 
 def outside_mask(layer: Layer) -> set[tuple[int, int]]:
@@ -413,6 +543,21 @@ def bounding_box(layer: Layer) -> tuple[int, int, int, int] | None:
         return None
     ys = [y for y in range(layer.height) for x in range(layer.width) if layer.grid[y][x] != TRANSPARENT_KEY]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def changed_box(before: list[list[str]], after: Layer) -> tuple[tuple[int, int, int, int] | None, int]:
+    """Inclusive bbox of the pixels that differ between a grid snapshot and a layer, and their count."""
+    xs: list[int] = []
+    ys: list[int] = []
+    for y in range(after.height):
+        b, a = before[y], after.grid[y]
+        for x in range(after.width):
+            if b[x] != a[x]:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return None, 0
+    return (min(xs), min(ys), max(xs), max(ys)), len(xs)
 
 
 def histogram(layer: Layer) -> dict[str, int]:

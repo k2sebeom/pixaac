@@ -359,9 +359,15 @@ class Sprite:
                 duration_ms=duration_ms,
                 layers=[Layer(ln, self.width, self.height) for ln in layer_names],
             )
-        idx = len(self.frames) if at is None else at
+        idx = len(self.frames) if at is None else max(0, min(at, len(self.frames)))
         self.frames.insert(idx, frame)
-        self._shift_tags(idx, +1)
+        # tags follow their frames: a tag starting at/after the insertion point
+        # shifts; one that spans the insertion point grows to include the new frame
+        for t in self.tags:
+            if t.start >= idx:
+                t.start += 1
+            if t.end >= idx:
+                t.end += 1
         return frame
 
     def remove_frame(self, ref: str | int) -> None:
@@ -369,26 +375,33 @@ class Sprite:
             raise SpriteError("a sprite must keep at least one frame")
         idx = self.frame_index(ref)
         del self.frames[idx]
-        self._shift_tags(idx, -1)
+        kept = []
+        for t in self.tags:
+            if t.start == t.end == idx:
+                continue  # the tag's only frame is gone
+            if t.start > idx:
+                t.start -= 1
+            if t.end >= idx:
+                t.end -= 1
+            kept.append(t)
+        self.tags = kept
 
     def move_frame(self, ref: str | int, to: int) -> None:
+        """Move a frame to index ``to``; tags keep pointing at the same frames.
+
+        A tag whose frames stay contiguous simply follows them. If the moved
+        frame leaves a tag's block, it drops out of that tag; if it is dropped
+        into the middle of a tag's block, that tag grows to include it.
+        """
         idx = self.frame_index(ref)
+        tagged = [(t, self.frames[t.start : t.end + 1]) for t in self.tags]
         f = self.frames.pop(idx)
         self.frames.insert(max(0, min(to, len(self.frames))), f)
-
-    def _shift_tags(self, idx: int, delta: int) -> None:
-        for t in self.tags:
-            if delta > 0:
-                if t.start >= idx:
-                    t.start += 1
-                if t.end >= idx:
-                    t.end += 1
-            else:
-                if t.start > idx:
-                    t.start -= 1
-                if t.end >= idx and t.end > t.start:
-                    t.end -= 1
-        self.tags = [t for t in self.tags if 0 <= t.start <= t.end < len(self.frames)]
+        for t, members in tagged:
+            pos = sorted(self.frames.index(m) for m in members)
+            if pos[-1] - pos[0] + 1 != len(pos) and f in members:
+                pos = sorted(self.frames.index(m) for m in members if m is not f)
+            t.start, t.end = pos[0], pos[-1]
 
     # -- layers (kept in sync across frames) ------------------------------- #
 
@@ -584,10 +597,30 @@ def _resolve(items: list, ref: str | int, kind: str):
     raise SpriteError(f"no {kind} named {ref!r}; have {[i.name for i in items]}")
 
 
-def _anchor_offset(anchor: str, ow: int, oh: int, nw: int, nh: int) -> tuple[int, int]:
-    a = anchor.lower()
-    if a in ("center", "middle"):
-        return (nw - ow) // 2, (nh - oh) // 2
-    dx = 0 if "left" in a else (nw - ow if "right" in a else (nw - ow) // 2)
-    dy = 0 if "top" in a else (nh - oh if "bottom" in a else (nh - oh) // 2)
+ANCHORS = (
+    "top-left", "top", "top-right",
+    "left", "center", "right",
+    "bottom-left", "bottom", "bottom-right",
+)
+"""Valid anchors for :meth:`Sprite.resize` and region stretching (``middle`` is an alias for ``center``)."""
+
+
+def normalize_anchor(anchor: str) -> str:
+    """Validate an anchor name and return its canonical form (``top-left``, ``bottom``, ...)."""
+    a = anchor.strip().lower().replace("_", "-").replace(" ", "-")
+    if a == "middle":
+        a = "center"
+    if a not in ANCHORS:
+        raise SpriteError(f"unknown anchor {anchor!r}; use one of: {', '.join(ANCHORS)} (middle = center)")
+    return a
+
+
+def anchor_offset(anchor: str, ow: int, oh: int, nw: int, nh: int) -> tuple[int, int]:
+    """Where an ``ow x oh`` box lands inside an ``nw x nh`` box when pinned to ``anchor``."""
+    parts = normalize_anchor(anchor).split("-")
+    dx = 0 if "left" in parts else (nw - ow if "right" in parts else (nw - ow) // 2)
+    dy = 0 if "top" in parts else (nh - oh if "bottom" in parts else (nh - oh) // 2)
     return dx, dy
+
+
+_anchor_offset = anchor_offset

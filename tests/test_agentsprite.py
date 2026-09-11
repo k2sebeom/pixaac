@@ -239,7 +239,8 @@ def test_api_workflow(tmp_path: Path):
     api.new(p, 6, 4)
     api.palette_set_many(p, {"k": "#000", "r": "#f00"})
     out = api.draw_set(p, "..kk..\n.krrk.\n..kk..")
-    assert "set grid" in out and "0 ..kk.." in out
+    assert "set grid" in out and "changed: x=1..4 y=0..2 (8 pixels)" in out and "0 .kk." in out
+    assert "0 ..kk.." in api.draw_set(p, "..kk..\n.krrk.\n..kk..", show="full")
     api.frame_add(p, copy_from=0, duration_ms=120)
     api.shift(p, 0, 1, frame="1")
     d = api.diff(p, "0", "1")
@@ -433,7 +434,7 @@ def test_onion_skin_view(tmp_path: Path):
     # row 0 of the grid: ghost where frame 0 was, real pixels where frame 1 is
     grid_row0 = [r for r in rows if r.startswith("0 ")][0]
     assert grid_row0 == "0 ''kk.."
-    assert "' = 4 pixel(s) of frame [0]" in text
+    assert "onion: ' = 4 pixel(s) only in frame [0] frame0; 4 pixel(s) only in this frame (x=2..3 y=0..1)" in text
     assert "legend: k=#000000" in text  # legend describes the real frame only
     assert "bbox: x=2..3 y=0..1" in text
     # "next" and explicit refs work; edges raise
@@ -548,7 +549,7 @@ def test_mcp_tools_return_plain_text(tmp_path: Path):
         assert "k  #000000" in r.content[0].text
         r = await server.mcp.call_tool("draw_set", {"path": p, "grid": "kw..\n..wk"})
         assert r.structured_content is None
-        assert "\n0 kw..\n1 ..wk" in r.content[0].text  # real newlines, not escaped
+        assert "\n0 kw..   kw\n1 ..wk     wk" in r.content[0].text  # real newlines, not escaped
         r = await server.mcp.call_tool("sprite_show", {"path": p, "frame": "0", "onion": "prev"})
         assert r.content[0].text.startswith("error: frame [0] has no previous frame")
         r = await server.mcp.call_tool("export_apng", {"path": p, "out": str(tmp_path / "m.png")})
@@ -582,3 +583,658 @@ def test_mcp_concurrent_edits_do_not_lose_writes(tmp_path: Path):
     asyncio.run(go())
     s = Sprite.load(p)
     assert all(s.frames[0].layers[0].grid[y][x] == "k" for x in range(16) for y in range(4))
+
+
+# --------------------------------------------------------------------------- #
+# dogfooding session 2 backlog
+# --------------------------------------------------------------------------- #
+
+
+def test_edit_show_modes(tmp_path: Path):
+    p = tmp_path / "s.sprite.json"
+    api.new(p, 32, 32)
+    api.palette_set_many(p, {"k": "#000"})
+    out = api.draw_rect(p, 12, 3, 15, 5, "k", fill=True)  # default bbox
+    lines = out.splitlines()
+    assert lines[0] == "filled rect 'k': 12 pixels affected in frame 0"
+    assert lines[1].startswith("changed: x=12..15 y=3..5 (12 pixels) in frame [0] frame0")
+    assert lines[2] == "  1   "  # tens ruler: first column labelled even though 12 % 10 != 0
+    assert lines[3] == "  2345"
+    assert lines[4:] == ["3 kkkk", "4 kkkk", "5 kkkk"]
+    assert len(out) < 250  # vs ~1.2 KB for the full 32x32 grid
+    assert api.draw_rect(p, 12, 3, 15, 5, "k", fill=True, show="none") == "filled rect 'k': 12 pixels affected in frame 0"
+    assert api.draw_rect(p, 12, 3, 15, 5, "k", fill=True).endswith("(no pixels changed)")
+    full = api.draw_pixels(p, [(0, 0)], "k", show="full")
+    assert "frame [0] frame0 (composite" in full and "legend: k=#000000" in full and "bbox: x=0..15" in full
+    with pytest.raises(SpriteError, match="show must be one of"):
+        api.draw_pixels(p, [(0, 0)], "k", show="huge")
+    # the bbox view follows the edited layer, absolute rulers on a padded row label
+    api.layer_add(p, "fx")
+    out = api.draw_pixels(p, [(3, 9), (3, 10)], "k", layer="fx")
+    assert "in frame [0] frame0 / layer 'fx'" in out
+    assert out.splitlines()[2:] == ["   3", " 9 k", "10 k"]
+
+
+def test_frame_lists_and_ranges(tmp_path: Path):
+    p = tmp_path / "f.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"k": "#000"})
+    api.draw_pixels(p, [(0, 0)], "k")
+    api.frame_add(p, copy_from="0", count=3)
+    api.frame_update(p, "3", name="last")
+    out = api.shift(p, 0, 1, frame="1,3")
+    assert "in frames 1,3" in out and "+1 more frame(s)" in out
+    s = Sprite.load(p)
+    assert [f.layers[0].grid[0][0] for f in s.frames] == ["k", ".", "k", "."]
+    assert [f.layers[0].grid[1][0] for f in s.frames] == [".", "k", ".", "k"]
+    api.draw_pixels(p, [(3, 3)], "k", frame="0..2,last")
+    assert all(f.layers[0].grid[3][3] == "k" for f in Sprite.load(p).frames)
+    api.draw_clear(p, frame="last, 0")  # spaces and names allowed
+    s = Sprite.load(p)
+    assert ops.bounding_box(s.frames[0].layers[0]) is None and ops.bounding_box(s.frames[3].layers[0]) is None
+    assert ops.bounding_box(s.frames[1].layers[0]) is not None
+    assert api._target_frames(s, "2..0") == [0, 1, 2]
+    assert api._target_frames(s, "1,1,all") == [1, 0, 2, 3]
+    with pytest.raises(SpriteError):
+        api._target_frames(s, "1,9")
+    with pytest.raises(SpriteError):
+        api._target_frames(s, ",")
+
+
+def test_frame_add_count(tmp_path: Path):
+    p = tmp_path / "n.sprite.json"
+    api.new(p, 2, 2)
+    api.palette_set_many(p, {"k": "#000"})
+    api.draw_pixels(p, [(1, 1)], "k")
+    out = api.frame_add(p, copy_from="0", count=3, duration_ms=80)
+    assert out.startswith("added 3 frames: [1] frame1, [2] frame2, [3] frame3 (copied from 0); now 4 frames")
+    s = Sprite.load(p)
+    assert all(f.layers[0].grid[1][1] == "k" and f.duration_ms == 80 for f in s.frames[1:])
+    out = api.frame_add(p, name="blink", count=2, at=0)  # inserted before the source; names get a suffix
+    assert "[0] blink0, [1] blink1" in out
+    assert [f.name for f in Sprite.load(p).frames][:3] == ["blink0", "blink1", "frame0"]
+    assert "added frame [6] solo" in api.frame_add(p, name="solo")
+    with pytest.raises(SpriteError):
+        api.frame_add(p, count=0)
+
+
+def test_keys_selection_clear_shift_copy(canvas):
+    s, l = canvas
+    s.palette.set("o", "#8b5a2b")
+    ops.paste(l, s.palette, "rrro\nrrro\nkkko", 0, 0)
+    assert ops.clear(l, keys="o") == 3
+    assert l.rows()[0] == "rrr....." and l.rows()[2] == "kkk....."
+    # shift only the 'r' pixels; the 'k' row stays and gets overwritten where they land
+    assert ops.shift(l, 0, 1, keys="r") == 6
+    assert l.rows()[:4] == ["........", "rrr.....", "rrr.....", "........"]
+    # region + keys together
+    l.grid[3][0] = "k"
+    assert ops.shift(l, 1, 0, region=(0, 1, 7, 3), keys="k") == 1
+    assert l.rows()[3] == ".k......" and l.rows()[1] == "rrr....."
+    other = l.copy()
+    ops.clear(other)
+    assert ops.copy_region(l, other, None, 0, 0, keys="k") == 1
+    assert other.rows()[3] == ".k......" and other.rows()[1] == "........"
+    # overwrite with keys only writes transparent when '.' is selected
+    other.grid[0][0] = "r"
+    ops.copy_region(l, other, (0, 0, 0, 0), 0, 0, overwrite=True, keys="k")
+    assert other.grid[0][0] == "r"
+    ops.copy_region(l, other, (0, 0, 0, 0), 0, 0, overwrite=True, keys="k.")
+    assert other.grid[0][0] == "."
+
+
+def test_cut_region_and_api_draw_cut(tmp_path: Path):
+    p = tmp_path / "w.sprite.json"
+    api.new(p, 6, 4)
+    api.palette_set_many(p, {"p": "#5533aa", "o": "#8b5a2b", "w": "#ffffff"})
+    api.draw_set(p, "pppp.w\npppp.o\npppp.o\n.pp..o")
+    api.frame_add(p, copy_from="0", count=2)
+    api.layer_add(p, "staff")
+    out = api.draw_cut(p, to_layer="staff", keys="ow", frame="all")
+    assert out.startswith("cut keys(ow) from frames 0,1,2 -> (0,0) frames 0,1,2 layer 'staff': 12 pixels affected")
+    assert "changed: x=5..5 y=0..3 (4 pixels) in frame [0] frame0 / layer 'staff'" in out
+    for f in Sprite.load(p).frames:
+        assert f.layer("base").rows() == ["pppp..", "pppp..", "pppp..", ".pp..."]
+        assert f.layer("staff").rows() == [".....w", ".....o", ".....o", ".....o"]
+    # region-only cut with an offset, single frame
+    api.draw_cut(p, to_layer="base", region=[5, 0, 5, 1], x=0, y=0, frame="1", layer="staff")
+    s = Sprite.load(p)
+    assert s.frames[1].layer("staff").rows() == ["......", "......", ".....o", ".....o"]
+    assert s.frames[1].layer("base").rows()[0] == "wppp.." and s.frames[1].layer("base").rows()[1] == "oppp.."
+    assert s.frames[0].layer("staff").rows()[0] == ".....w"  # other frames untouched
+    # cutting a layer onto itself at the same position is a no-op mistake
+    with pytest.raises(SpriteError, match="cut needs"):
+        api.draw_cut(p, to_layer="base", keys="p")
+    # copy into a list of destination frames, keys-filtered
+    api.draw_copy(p, [0, 0, 5, 3], 0, 0, from_frame="1", to_frame="0,2", from_layer="base", keys="w")
+    assert all(Sprite.load(p).frames[i].layer("base").grid[0][0] == "w" for i in (0, 2))
+    with pytest.raises(SpriteError, match="cannot pair"):
+        api.draw_copy(p, [0, 0, 1, 1], 0, 0, from_frame="0,1", to_frame="0,1,2")
+
+
+def test_replace_region(canvas):
+    s, l = canvas
+    ops.rect(l, s.palette, 0, 0, 7, 7, "r", fill=True)
+    assert ops.replace(l, s.palette, "r", "k", region=(2, 2, 3, 3)) == 4
+    assert ops.histogram(l) == {"r": 60, "k": 4}
+    assert l.grid[2][2] == "k" and l.grid[1][1] == "r"
+
+
+def test_api_replace_region(tmp_path: Path):
+    p = tmp_path / "r.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"b": "#0000ff", "B": "#8888ff"})
+    api.draw_rect(p, 0, 0, 3, 3, "b", fill=True)
+    api.frame_add(p, copy_from="0")
+    out = api.draw_replace(p, "b", "B", region=[1, 1, 2, 2])  # all frames by default
+    assert "replace 'b'->'B' region(1,1,2,2): 8 pixels affected in frames 0,1" in out
+    for f in Sprite.load(p).frames:
+        assert f.layers[0].rows() == ["bbbb", "bBBb", "bBBb", "bbbb"]
+
+
+def test_onion_layer(tmp_path: Path):
+    p = tmp_path / "ol.sprite.json"
+    api.new(p, 6, 2)
+    api.palette_set_many(p, {"k": "#000", "o": "#8b5a2b"})
+    api.layer_add(p, "staff")
+    api.draw_pixels(p, [(0, 0), (1, 0)], "k", layer="base")
+    api.draw_pixels(p, [(5, 0), (5, 1)], "o", layer="staff")
+    api.frame_add(p, copy_from="0")
+    api.shift(p, 0, 1, frame="1", layer="base")
+    s = Sprite.load(p)
+    # same-layer ghost (old behaviour): staff not in the ghost
+    same = view.frame_text(s, 1, layer_ref="base", onion="prev")
+    assert "0 ''...." in same and "onion: frame [0] frame0" in same.splitlines()[0]
+    # composite ghost: the staff of frame 0 shows up as ghost too
+    comp = view.frame_text(s, 1, layer_ref="base", onion="prev", onion_layer="composite")
+    assert "0 ''...'" in comp and "1 kk...'" in comp
+    assert "onion: frame [0] frame0 (composite)" in comp.splitlines()[0]
+    assert "' = 4 pixel(s) only in frame [0] frame0 (composite); 2 pixel(s) only in this frame (x=0..1 y=1..1)" in comp
+    # explicit other layer
+    other = view.frame_text(s, 1, layer_ref="base", onion="prev", onion_layer="staff")
+    assert "0 .....'" in other and "/ layer 'staff'" in other.splitlines()[0]
+    assert "0 ''...'" in api.show(p, "1", layer="base", onion="prev", onion_layer="all")
+    with pytest.raises(SpriteError):
+        api.show(p, "1", layer="base", onion="prev", onion_layer="nope")
+
+
+def test_info_per_layer_pixel_counts(tmp_path: Path):
+    p = tmp_path / "i.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"p": "#5533aa", "o": "#8b5a2b", "w": "#fff"})
+    api.layer_add(p, "staff")
+    api.draw_rect(p, 0, 0, 2, 2, "p", fill=True, layer="base")
+    api.draw_pixels(p, [(3, 0), (3, 1)], "o", layer="staff")
+    api.draw_pixels(p, [(3, 2)], "w", layer="staff")
+    api.frame_add(p, copy_from="0")
+    api.draw_clear(p, frame="1", layer="staff")
+    api.layer_visible(p, "staff", False)
+    info = api.info(p)
+    assert "layers (bottom -> top" in info
+    assert "  [0] base   px: 9,9  keys: p" in info
+    assert "  [1] staff  px: 3,0  keys: ow  (hidden)" in info
+    assert api.layer_list(p) == view.layers_text(Sprite.load(p))
+    empty = api.info(tmp_path / "i.sprite.json").splitlines()
+    assert any("keys: p" in l for l in empty)
+    api.new(tmp_path / "e.sprite.json", 2, 2)
+    assert "[0] base  px: 0  keys: -" in api.info(tmp_path / "e.sprite.json")
+
+
+def test_guide_mentions_layer_plan_and_new_tools():
+    from agentsprite.server import GUIDE
+
+    assert "own layer" in GUIDE and "draw_cut" in GUIDE
+    assert 'show="full"' in GUIDE and "onion_layer" in GUIDE and "count=3" in GUIDE
+
+
+def test_mcp_new_tool_params(tmp_path: Path):
+    import asyncio
+
+    from agentsprite import server
+
+    p = str(tmp_path / "m2.sprite.json")
+
+    async def go():
+        tools = {t.name: t for t in (await server.mcp.list_tools())}
+        assert "draw_cut" in tools
+        for name in ("draw_set", "draw_paste", "draw_pixels", "draw_rect", "draw_replace", "draw_clear", "draw_copy",
+                     "transform_shift", "transform_flip", "draw_outline"):
+            assert "show" in tools[name].input_schema["properties"], name
+        for name in ("draw_clear", "draw_copy", "transform_shift", "draw_cut"):
+            assert "keys" in tools[name].input_schema["properties"], name
+        assert "region" in tools["draw_replace"].input_schema["properties"]
+        assert "count" in tools["frame_add"].input_schema["properties"]
+        assert "onion_layer" in tools["sprite_show"].input_schema["properties"]
+        await server.mcp.call_tool("sprite_new", {"path": p, "width": 8, "height": 8})
+        await server.mcp.call_tool("palette_set", {"path": p, "colors": {"k": "#000", "o": "#8b5a2b"}})
+        r = await server.mcp.call_tool("draw_rect", {"path": p, "x0": 1, "y0": 1, "x1": 2, "y1": 2, "key": "k", "fill": True})
+        assert r.content[0].text.splitlines()[1].startswith("changed: x=1..2 y=1..2 (4 pixels)")
+        r = await server.mcp.call_tool("draw_pixels", {"path": p, "points": [[7, 7]], "key": "o", "show": "none"})
+        assert r.content[0].text == "pixels 'o': 1 pixels affected in frame 0"
+        r = await server.mcp.call_tool("frame_add", {"path": p, "copy_from": "0", "count": 2})
+        assert "added 2 frames" in r.content[0].text
+        r = await server.mcp.call_tool("transform_shift", {"path": p, "dx": 0, "dy": 1, "frame": "0,2", "keys": "k"})
+        assert "in frames 0,2" in r.content[0].text
+        r = await server.mcp.call_tool("layer_add", {"path": p, "name": "prop"})
+        r = await server.mcp.call_tool("draw_cut", {"path": p, "to_layer": "prop", "keys": "o", "frame": "all"})
+        assert r.content[0].text.startswith("cut keys(o)")
+        s = Sprite.load(p)
+        assert all(f.layer("prop").grid[7][7] == "o" and f.layer("base").grid[7][7] == "." for f in s.frames)
+        assert s.frames[0].layer("base").grid[2][1] == "k" and s.frames[1].layer("base").grid[1][1] == "k"
+        r = await server.mcp.call_tool("draw_replace", {"path": p, "old": "k", "new": "o", "region": [1, 2, 1, 2], "frame": "0"})
+        assert "region(1,2,1,2): 1 pixels" in r.content[0].text
+        r = await server.mcp.call_tool("sprite_show", {"path": p, "frame": "1", "layer": "base", "onion": "prev", "onion_layer": "composite"})
+        assert "(composite)" in r.content[0].text
+
+    asyncio.run(go())
+
+
+# --------------------------------------------------------------------------- #
+# dogfooding session 3
+# --------------------------------------------------------------------------- #
+
+
+def test_frame_move_keeps_tags_on_their_frames():
+    s = Sprite.new("m", 2, 2)
+    for _ in range(5):
+        s.add_frame()  # frame0..frame5
+    s.set_tag("a", 0, 2)
+    s.set_tag("tail", 4, 5)
+    s.move_frame(5, 0)  # frame5 lands in front: a's frames are now at 1..3
+    assert [f.name for f in s.frames] == ["frame5", "frame0", "frame1", "frame2", "frame3", "frame4"]
+    assert (s.tag("a").start, s.tag("a").end) == (1, 3)
+    # frame5 left the tail block, so the tag shrinks to the frame that stayed (frame4, now last)
+    assert (s.tag("tail").start, s.tag("tail").end) == (5, 5)
+    # a frame moved out of a tag's block leaves the tag
+    s = Sprite.new("m", 2, 2)
+    for _ in range(5):
+        s.add_frame()
+    s.set_tag("a", 0, 2)
+    s.move_frame(1, 5)
+    assert [f.name for f in s.frames][:2] == ["frame0", "frame2"]
+    assert (s.tag("a").start, s.tag("a").end) == (0, 1)
+    # a frame dropped into the middle of a block joins it
+    s.set_tag("a", 0, 1)
+    s.move_frame("frame5", 1)
+    assert (s.tag("a").start, s.tag("a").end) == (0, 2)
+    # a single-frame tag follows its frame
+    s.set_tag("solo", 4, 4)
+    name = s.frames[4].name
+    s.move_frame(4, 0)
+    assert s.frames[0].name == name and (s.tag("solo").start, s.tag("solo").end) == (0, 0)
+    # consistent with frame_add(at=0) shifting the tag
+    s.set_tag("a", 1, 3)
+    s.add_frame(at=0)
+    assert (s.tag("a").start, s.tag("a").end) == (2, 4)
+
+
+def test_api_frame_move_reports_tags(tmp_path: Path):
+    p = tmp_path / "fm.sprite.json"
+    api.new(p, 2, 2)
+    api.frame_add(p, count=3)
+    api.tag_set(p, "a", 0, 2)
+    out = api.frame_move(p, "3", 0)
+    assert out.splitlines()[0] == "frames: [0] frame3, [1] frame0, [2] frame1, [3] frame2"
+    assert out.splitlines()[1] == "tags: a: 1..3"
+    api.frame_remove(p, "0")
+    assert (Sprite.load(p).tag("a").start, Sprite.load(p).tag("a").end) == (0, 2)
+
+
+def test_transforms_count_only_changed_pixels(canvas):
+    s, l = canvas
+    ops.rect(l, s.palette, 0, 0, 7, 7, "r", fill=True)  # solid square: every symmetric op is a no-op
+    assert ops.set_grid(l, s.palette, "\n".join(["rrrrrrrr"] * 8)) == 0
+    assert ops.rotate(l, 1) == 0
+    assert ops.flip(l, "h") == 0
+    assert ops.mirror(l, "h") == 0
+    assert ops.mirror(l, "v") == 0
+    l.grid[0][0] = "k"
+    assert ops.rotate(l, 1) == 2  # k moves (0,0)->(7,0): two cells differ
+    assert ops.flip(l, "h") == 2
+    assert ops.mirror(l, "h") == 1  # k at (0,0) is copied over the r at (7,0)
+    assert ops.histogram(l) == {"r": 62, "k": 2}
+    assert ops.set_grid(l, s.palette, "kkkkkkkk") == 6 + 56  # row 0: 6 new k; rows 1..7 padded to '.'
+
+
+def test_api_set_grid_reports_changed_only(tmp_path: Path):
+    p = tmp_path / "sg.sprite.json"
+    api.new(p, 24, 24)
+    api.palette_set_many(p, {"g": "#4ade80"})
+    full = "\n".join(["g" * 24] * 24)
+    assert api.draw_set(p, full).startswith("set grid: 576 pixels affected")
+    out = api.draw_set(p, full)  # identical grid
+    assert out.startswith("set grid: 0 pixels affected") and out.endswith("(no pixels changed)")
+    assert api.rotate(p, 1).startswith("rotate 90°: 0 pixels affected")
+    assert api.flip(p, "v").startswith("flip v: 0 pixels affected")
+    assert api.mirror(p).startswith("mirror h from first: 0 pixels affected")
+
+
+def test_shift_region_overwrite(canvas):
+    s, l = canvas
+    # outline at x=1 and x=6 across rows 0..7, "dome" of r at rows 0..3 between them
+    ops.rect(l, s.palette, 1, 0, 6, 7, "k")
+    ops.rect(l, s.palette, 2, 0, 5, 3, "r", fill=True)
+    # merge (default): shifting rows 0..3 down 2 keeps the old outline where the moved box is transparent
+    merged = l.copy()
+    ops.shift(merged, 0, 2, region=(0, 0, 7, 3))
+    assert merged.rows()[4] == ".krrrrk."
+    assert merged.rows()[0] == "........" and merged.rows()[1] == "........"
+    # overwrite: the moved box's footprint fully replaces rows 2..5
+    over = l.copy()
+    n = ops.shift(over, 0, 2, region=(0, 0, 7, 3), overwrite=True)
+    assert over.rows()[0] == "........" and over.rows()[1] == "........"
+    assert over.rows()[2] == ".krrrrk." and over.rows()[5] == ".krrrrk."
+    assert over.rows()[6] == ".k....k."
+    assert n == 8 * 4  # every cell of the box moved, transparent ones included
+
+
+def test_api_shift_overwrite(tmp_path: Path):
+    p = tmp_path / "so.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"k": "#000", "r": "#f00"})
+    api.draw_set(p, "rr..\n....\nkkkk\n....")
+    out = api.shift(p, 0, 2, region=[0, 0, 3, 0], overwrite=True)
+    assert out.startswith("shift (0,2) region(0,0,3,0) overwrite:")
+    assert Sprite.load(p).frames[0].layers[0].rows() == ["....", "....", "rr..", "...."]
+    api.draw_set(p, "rr..\n....\nkkkk\n....")
+    api.shift(p, 0, 2, region=[0, 0, 3, 0])
+    assert Sprite.load(p).frames[0].layers[0].rows() == ["....", "....", "rrkk", "...."]
+
+
+def test_diff_grid_and_limit(tmp_path: Path):
+    p = tmp_path / "d.sprite.json"
+    api.new(p, 4, 2)
+    api.palette_set_many(p, {"g": "#0f0", "r": "#f00"})
+    api.draw_set(p, "gg..\ngg..")
+    api.frame_add(p, copy_from="0")
+    api.draw_set(p, "rg..\n.ggg", frame="1")
+    out = api.diff(p, "0", "1")
+    lines = out.splitlines()
+    assert lines[0].startswith("4 pixels differ between frame [0] frame0 and [1] frame1: 2 added, 1 removed, 1 recolored; bbox x=0..3 y=0..1")
+    assert "grid: key = [1]'s key where the frames differ, ' = transparent in [1], . = identical" in lines[1]
+    assert lines[3:5] == ["0 r...", "1 '.gg"]
+    assert "->" not in out  # per-pixel list is off by default
+    limited = api.diff(p, "0", "1", limit=2)
+    assert limited.count("->") == 2 and "... 2 more (limit=-1 lists all)" in limited
+    everything = api.diff(p, "0", "1", limit=-1)
+    assert everything.count("->") == 4 and "(0,0): g -> r" in everything
+    assert api.diff(p, "0", "0").startswith("frames [0] frame0 and [0] frame0 are identical")
+
+
+def test_replace_map_simultaneous(canvas):
+    s, l = canvas
+    s.palette.set("G", "#0a0")
+    ops.paste(l, s.palette, "rkG", 0, 0)
+    assert ops.replace_map(l, s.palette, {"r": "k", "k": "r"}) == 2  # swap
+    assert l.rows()[0] == "krG....."
+    assert ops.replace_map(l, s.palette, {"k": "G", "G": "k", "r": "r"}) == 2
+    assert l.rows()[0] == "Grk....."
+    with pytest.raises(SpriteError):
+        ops.replace_map(l, s.palette, {"k": "z"})
+    with pytest.raises(SpriteError):
+        ops.replace_map(l, s.palette, {})
+    assert api.replace_mapping("gGl", "rRw") == {"g": "r", "G": "R", "l": "w"}
+    assert api.replace_mapping(None, None, {"g": "r"}) == {"g": "r"}
+    assert api.replace_mapping("g", "r", {"G": "R"}) == {"g": "r", "G": "R"}
+    with pytest.raises(SpriteError):
+        api.replace_mapping("gG", "r")
+    with pytest.raises(SpriteError):
+        api.replace_mapping("gg", "rk")
+    with pytest.raises(SpriteError):
+        api.replace_mapping(None, None, None)
+
+
+def test_api_multi_key_replace(tmp_path: Path):
+    p = tmp_path / "mk.sprite.json"
+    api.new(p, 3, 1)
+    api.palette_set_many(p, {"g": "#0f0", "G": "#0a0", "l": "#ccc", "r": "#f00", "R": "#a00", "w": "#fff"})
+    api.draw_set(p, "gGl")
+    api.frame_add(p, copy_from="0", name="hurt0")
+    out = api.draw_replace(p, "gGl", "rRw", frame="hurt0")
+    assert out.startswith("replace 'g'->'r','G'->'R','l'->'w': 3 pixels affected in frame 1")
+    s = Sprite.load(p)
+    assert s.frames[1].layers[0].rows() == ["rRw"] and s.frames[0].layers[0].rows() == ["gGl"]
+    api.draw_replace(p, mapping={"g": "G", "G": "g"}, frame="0")
+    assert Sprite.load(p).frames[0].layers[0].rows() == ["Ggl"]
+
+
+def test_import_png_reads_sheet_metadata(tmp_path: Path):
+    p = tmp_path / "slime.sprite.json"
+    api.new(p, 4, 3)
+    api.palette_set_many(p, {"k": "#0f0f1a", "g": "#4ade80", "s": "#0f0f1a80"})
+    api.draw_set(p, "kgg.\nkss.\n....")
+    api.frame_add(p, copy_from="0", name="rest", duration_ms=150)
+    api.frame_add(p, name="hurt0", duration_ms=60)
+    api.draw_pixels(p, [(3, 2)], "s", frame="hurt0")
+    api.tag_set(p, "bounce", 0, 1, "pingpong")
+    api.tag_set(p, "hurt", 2, 2, loop=False)
+    api.export_sheet(p, tmp_path / "out" / "slime_sheet.png", columns=2, padding=1, scale=2)
+    # sibling json picked up automatically
+    out = api.import_png(tmp_path / "out" / "slime_sheet.png", tmp_path / "back.sprite.json")
+    assert "metadata: " in out and "2 tag(s)" in out and "palette)" in out
+    b = Sprite.load(tmp_path / "back.sprite.json")
+    a = Sprite.load(p)
+    assert (b.width, b.height) == (4, 3)
+    assert [f.name for f in b.frames] == ["frame0", "rest", "hurt0"]
+    assert [f.duration_ms for f in b.frames] == [100, 150, 60]
+    assert [(t.name, t.start, t.end, t.direction, t.loop) for t in b.tags] == [
+        ("bounce", 0, 1, "pingpong", True), ("hurt", 2, 2, "forward", False)
+    ]
+    assert b.palette.colors == a.palette.colors  # same keys, including the semi-transparent shadow
+    assert [f.layers[0].rows() for f in b.frames] == [f.layers[0].rows() for f in a.frames]
+    # explicit metadata path, and --palette-from wins over the sheet palette
+    api.import_png(
+        tmp_path / "out" / "slime_sheet.png", tmp_path / "back2.sprite.json",
+        metadata=tmp_path / "out" / "slime_sheet.json", palette_from=p,
+    )
+    assert Sprite.load(tmp_path / "back2.sprite.json").frames[1].name == "rest"
+    with pytest.raises(SpriteError, match="no such metadata"):
+        api.import_png(tmp_path / "out" / "slime_sheet.png", tmp_path / "x.sprite.json", metadata=tmp_path / "nope.json")
+    # a sibling json that is not sheet metadata is ignored; an explicit one is an error
+    img = Image.new("RGBA", (2, 2), (255, 0, 0, 255))
+    img.save(tmp_path / "plain.png")
+    (tmp_path / "plain.json").write_text('{"hello": 1}')
+    out = api.import_png(tmp_path / "plain.png", tmp_path / "plain.sprite.json")
+    assert "metadata:" not in out
+    with pytest.raises(SpriteError, match="no 'frames' list"):
+        api.import_png(tmp_path / "plain.png", tmp_path / "plain2.sprite.json", metadata=tmp_path / "plain.json")
+    # size mismatch between sheet and metadata is caught
+    Image.new("RGBA", (5, 5)).save(tmp_path / "out" / "wrong.png")
+    with pytest.raises(SpriteError, match="describes a"):
+        api.import_png(tmp_path / "out" / "wrong.png", tmp_path / "w.sprite.json", metadata=tmp_path / "out" / "slime_sheet.json")
+
+
+def test_import_metadata_frame_size_override_note(tmp_path: Path):
+    p = tmp_path / "a.sprite.json"
+    api.new(p, 3, 2)
+    api.palette_set_many(p, {"k": "#000"})
+    api.draw_pixels(p, [(0, 0)], "k")
+    api.frame_add(p, copy_from="0")
+    api.export_sheet(p, tmp_path / "a.png")
+    out = api.import_png(tmp_path / "a.png", tmp_path / "b.sprite.json", frame_width=1, frame_height=1)
+    assert "note: frame size 1x1 ignored; metadata says 3x2" in out
+    assert Sprite.load(tmp_path / "b.sprite.json").width == 3
+
+
+def test_resize_anchor_validation_and_show(tmp_path: Path):
+    from agentsprite.model import ANCHORS, anchor_offset, normalize_anchor
+
+    assert normalize_anchor("Bottom_Right") == "bottom-right"
+    assert normalize_anchor("middle") == "center"
+    assert normalize_anchor(" top ") == "top"
+    for a in ANCHORS:
+        normalize_anchor(a)
+    with pytest.raises(SpriteError, match="unknown anchor 'botom'"):
+        normalize_anchor("botom")
+    assert anchor_offset("bottom", 2, 2, 4, 6) == (1, 4)
+    assert anchor_offset("top-right", 2, 2, 4, 6) == (2, 0)
+    p = tmp_path / "rs.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"k": "#000"})
+    api.draw_rect(p, 0, 0, 1, 1, "k", fill=True)
+    with pytest.raises(SpriteError, match="unknown anchor"):
+        api.resize(p, 6, 6, "botom")
+    out = api.resize(p, 6, 6, "bottom-right")
+    lines = out.splitlines()
+    assert lines[0] == "resized 4x4 -> 6x6 (anchor bottom-right; content moved by (+2,+2))"
+    assert lines[1].startswith("content: x=2..3 y=2..3 in frame [0] frame0")
+    assert lines[2:] == ["  23", "2 kk", "3 kk"]
+    assert api.resize(p, 6, 6, "center", show="none") == "resized 6x6 -> 6x6 (anchor center; content moved by (+0,+0))"
+    full = api.resize(p, 8, 8, "top-left", show="full")
+    assert "frame [0] frame0 (composite" in full and "legend: k=#000000" in full
+    out = api.resize(p, 2, 2, "top-left")
+    assert "4 pixels cropped away" in out and "(frame [0] frame0 is empty)" in out
+    with pytest.raises(SpriteError, match="show must be"):
+        api.resize(p, 2, 2, show="huge")
+
+
+def test_stretch_squash_keeps_feet_and_outline(canvas):
+    s, l = canvas
+    # 6x6 body in rows 1..6: outline k, fill r
+    ops.rect(l, s.palette, 1, 1, 6, 6, "k")
+    ops.rect(l, s.palette, 2, 2, 5, 5, "r", fill=True)
+    before = l.rows()
+    n = ops.stretch(l, (1, 1, 6, 6), dy=-2, anchor="bottom")
+    rows = l.rows()
+    assert rows[0] == "........" and rows[1] == "........" and rows[2] == "........"
+    assert rows[3] == ".kkkkkk."  # top edge kept
+    assert rows[4] == ".krrrrk." and rows[5] == ".krrrrk."
+    assert rows[6] == ".kkkkkk."  # bottom edge stays put
+    assert rows[7] == "........"
+    assert n == 6 * 2 + 4  # rows 1..2 cleared (12); row 3 turns from krrrrk into the top edge (4)
+    # stretch back up by 2: nearest neighbour duplicates rows, so the box is 6 tall again
+    # with its outline intact, but the sampled rows are not the originals
+    ops.stretch(l, (1, 3, 6, 6), dy=2, anchor="bottom")
+    rows = l.rows()
+    assert rows[1] == ".kkkkkk." and rows[6] == ".kkkkkk." and rows[0] == "........" and rows[7] == "........"
+    assert all(r[1] == "k" and r[6] == "k" for r in rows[1:7])
+    assert ".krrrrk." in rows[2:6]
+    l.grid = [list(r) for r in before]
+    # horizontal stretch centred: width 6 -> 8 fills x=0..7
+    ops.stretch(l, (1, 1, 6, 6), dx=2, anchor="bottom")
+    assert l.rows()[1] == "kkkkkkkk" and l.rows()[3] == "krrrrrrk"
+    # shrinking below 1 row is an error; a no-op stretch is rejected at the api level
+    with pytest.raises(SpriteError):
+        ops.stretch(l, (0, 0, 7, 1), dy=-2)
+
+
+def test_api_stretch(tmp_path: Path):
+    p = tmp_path / "st.sprite.json"
+    api.new(p, 8, 8)
+    api.palette_set_many(p, {"k": "#000", "r": "#f00"})
+    api.draw_rect(p, 1, 1, 6, 6, "k")
+    api.draw_rect(p, 2, 2, 5, 5, "r", fill=True)
+    api.frame_add(p, copy_from="0", name="squash")
+    api.frame_add(p, copy_from="0", name="stretch")
+    out = api.stretch(p, [1, 1, 6, 6], dy=-2, frame="squash")
+    assert out.startswith("stretch (+0,-2) region(1,1,6,6) anchor bottom: 16 pixels affected in frame 1")
+    assert "changed: x=1..6 y=1..3 (16 pixels)" in out
+    api.stretch(p, [1, 1, 6, 6], dy=1, anchor="bottom", frame="stretch")
+    s = Sprite.load(p)
+    assert s.frame("squash").layers[0].rows()[3] == ".kkkkkk." and s.frame("squash").layers[0].rows()[6] == ".kkkkkk."
+    assert s.frame("stretch").layers[0].rows()[0] == ".kkkkkk." and s.frame("stretch").layers[0].rows()[6] == ".kkkkkk."
+    assert s.frame("frame0").layers[0].rows()[1] == ".kkkkkk."  # untouched
+    with pytest.raises(SpriteError, match="non-zero"):
+        api.stretch(p, [1, 1, 6, 6])
+    with pytest.raises(SpriteError, match="unknown anchor"):
+        api.stretch(p, [1, 1, 6, 6], dy=-1, anchor="feet")
+    # top anchor grows downwards
+    api.stretch(p, [1, 1, 6, 6], dy=1, anchor="top", frame="0")
+    assert Sprite.load(p).frames[0].layers[0].rows()[7] == ".kkkkkk."
+
+
+def test_bbox_echo_marks_changed_cells(tmp_path: Path):
+    p = tmp_path / "e.sprite.json"
+    api.new(p, 6, 6)
+    api.palette_set_many(p, {"g": "#0f0"})
+    api.draw_rect(p, 0, 0, 5, 5, "g", fill=True)
+    # 4 'g' pixels set inside a 'g' area: nothing changes, and the echo says so
+    assert api.draw_pixels(p, [(1, 1), (4, 4)], "g").endswith("(no pixels changed)")
+    api.palette_set_many(p, {"k": "#000"})
+    out = api.draw_pixels(p, [(1, 1), (4, 4)], "k")
+    lines = out.splitlines()
+    assert lines[1].endswith("right grid = changed cells only")
+    assert lines[2] == "  1234   1234"
+    assert lines[3] == "1 kggg   k"
+    assert lines[4] == "2 gggg"
+    assert lines[6] == "4 gggk      k"
+    # a fully-changed box is echoed once, without the mask
+    out = api.draw_rect(p, 2, 2, 3, 3, "k", fill=True)
+    assert "changed cells only" not in out and out.splitlines()[2:] == ["  23", "2 kk", "3 kk"]
+
+
+def test_onion_counts_both_directions(tmp_path: Path):
+    p = tmp_path / "ob.sprite.json"
+    api.new(p, 6, 4)
+    api.palette_set_many(p, {"g": "#0f0"})
+    api.draw_rect(p, 1, 2, 4, 3, "g", fill=True)  # rest: 4x2 block
+    api.frame_add(p, copy_from="0", name="stretch")
+    api.draw_rect(p, 1, 0, 4, 1, "g", fill=True, frame="stretch")  # superset: dome grew by 8
+    text = view.frame_text(Sprite.load(p), "stretch", onion="0")
+    assert "onion: ' = 0 pixel(s) only in frame [0] frame0; 8 pixel(s) only in this frame (x=1..4 y=0..1)" in text
+    text = view.frame_text(Sprite.load(p), "0", onion="stretch")
+    assert "onion: ' = 8 pixel(s) only in frame [1] stretch; 0 pixel(s) only in this frame" in text
+    assert "0 .''''." in text
+
+
+def test_cli_session3_surface(tmp_path: Path):
+    from typer.testing import CliRunner
+
+    from agentsprite.cli import app
+
+    runner = CliRunner()
+    p = str(tmp_path / "c.sprite.json")
+    assert runner.invoke(app, ["new", p, "-w", "8", "-h", "8"]).exit_code == 0
+    assert runner.invoke(app, ["palette", "set", p, "k=#000", "r=#f00", "g=#0f0", "G=#0a0"]).exit_code == 0
+    assert runner.invoke(app, ["draw", "rect", p, "1", "1", "6", "6", "k"]).exit_code == 0
+    assert runner.invoke(app, ["draw", "rect", p, "2", "2", "5", "5", "g", "--fill"]).exit_code == 0
+    r = runner.invoke(app, ["transform", "stretch", p, "-r", "1,1,6,6", "--dy", "-2"])
+    assert r.exit_code == 0 and r.output.startswith("stretch (+0,-2)")
+    assert Sprite.load(p).frames[0].layers[0].rows()[3] == ".kkkkkk."
+    r = runner.invoke(app, ["draw", "replace", p, "gG", "Gg"])
+    assert r.exit_code == 0 and "'g'->'G','G'->'g'" in r.output
+    assert runner.invoke(app, ["frame", "add", p, "--copy", "0"]).exit_code == 0
+    r = runner.invoke(app, ["transform", "shift", p, "0", "1", "-f", "1", "-r", "0,3,7,3", "--overwrite"])
+    assert r.exit_code == 0 and "overwrite" in r.output
+    r = runner.invoke(app, ["diff", p, "0", "1", "--limit", "3"])
+    assert r.exit_code == 0 and r.output.count("->") == 3 and "more (limit=-1" in r.output
+    r = runner.invoke(app, ["resize", p, "10", "10", "--anchor", "botom"])
+    assert r.exit_code == 1 and "unknown anchor" in r.output
+    r = runner.invoke(app, ["resize", p, "10", "10", "--anchor", "center", "--show", "none"])
+    assert r.exit_code == 0 and r.output.strip() == "resized 8x8 -> 10x10 (anchor center; content moved by (+1,+1))"
+    assert runner.invoke(app, ["export", "sheet", p, str(tmp_path / "s.png")]).exit_code == 0
+    r = runner.invoke(app, ["import", str(tmp_path / "s.png"), str(tmp_path / "i.sprite.json"), "-m", str(tmp_path / "s.json")])
+    assert r.exit_code == 0 and "metadata:" in r.output
+    assert len(Sprite.load(tmp_path / "i.sprite.json").frames) == 2
+
+
+def test_mcp_session3_tools(tmp_path: Path):
+    import asyncio
+
+    from agentsprite import server
+
+    p = str(tmp_path / "m3.sprite.json")
+
+    async def go():
+        tools = {t.name: t for t in (await server.mcp.list_tools())}
+        assert "transform_stretch" in tools
+        assert "overwrite" in tools["transform_shift"].input_schema["properties"]
+        assert "mapping" in tools["draw_replace"].input_schema["properties"]
+        assert "limit" in tools["sprite_diff"].input_schema["properties"]
+        assert "show" in tools["sprite_resize"].input_schema["properties"]
+        assert "metadata" in tools["import_png"].input_schema["properties"]
+        await server.mcp.call_tool("sprite_new", {"path": p, "width": 8, "height": 8})
+        await server.mcp.call_tool("palette_set", {"path": p, "colors": {"k": "#000", "g": "#0f0", "r": "#f00"}})
+        await server.mcp.call_tool("draw_rect", {"path": p, "x0": 1, "y0": 1, "x1": 6, "y1": 6, "key": "k"})
+        await server.mcp.call_tool("draw_rect", {"path": p, "x0": 2, "y0": 2, "x1": 5, "y1": 5, "key": "g", "fill": True})
+        r = await server.mcp.call_tool("transform_stretch", {"path": p, "region": [1, 1, 6, 6], "dy": -2})
+        assert r.content[0].text.startswith("stretch (+0,-2) region(1,1,6,6) anchor bottom")
+        r = await server.mcp.call_tool("draw_replace", {"path": p, "mapping": {"g": "r", "k": "g"}})
+        assert "'g'->'r','k'->'g'" in r.content[0].text
+        assert Sprite.load(p).frames[0].layers[0].rows()[3] == ".gggggg."
+        r = await server.mcp.call_tool("sprite_resize", {"path": p, "width": 4, "height": 4, "anchor": "botom"})
+        assert r.content[0].text.startswith("error: unknown anchor 'botom'")
+        r = await server.mcp.call_tool("sprite_resize", {"path": p, "width": 10, "height": 10, "anchor": "center", "show": "none"})
+        assert r.content[0].text == "resized 8x8 -> 10x10 (anchor center; content moved by (+1,+1))"
+
+    asyncio.run(go())

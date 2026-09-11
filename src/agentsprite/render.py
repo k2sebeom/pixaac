@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image, PngImagePlugin
@@ -152,6 +153,7 @@ def build_sheet(
         frames_meta.append(
             {
                 "filename": f"{sprite.name}_{fi}_{f.name}",
+                "name": f.name,
                 "index": fi,
                 "frame": {"x": x, "y": y, "w": fw, "h": fh},
                 "rotated": False,
@@ -167,6 +169,7 @@ def build_sheet(
         "meta": {
             "app": "agentsprite",
             "version": "0.1",
+            "name": sprite.name,
             "format": "RGBA8888",
             "size": {"w": sheet_w, "h": sheet_h},
             "scale": str(scale),
@@ -299,6 +302,100 @@ def _to_gif_frame(img: Image.Image) -> Image.Image:
 # --------------------------------------------------------------------------- #
 
 
+@dataclass
+class SheetMeta:
+    """The parts of an ``export_sheet`` JSON file that an import can use."""
+
+    path: Path
+    name: str | None
+    frames: list[dict]  # {"rect": (x, y, w, h), "name": str, "duration": int, "index": int}
+    tags: list[dict]  # {"name", "from", "to", "direction", "loop"}
+    palette: dict[str, str | None] | None
+    size: tuple[int, int] | None
+    scale: int = 1
+    notes: list[str] = field(default_factory=list)
+
+
+def load_sheet_metadata(png: str | Path, metadata: str | Path | None = None) -> SheetMeta | None:
+    """Read sheet metadata for ``png``.
+
+    With ``metadata`` given the file must exist and parse. Otherwise the
+    sibling ``<png>.json`` is used when it exists and looks like sheet
+    metadata (has a ``frames`` list); anything else is ignored.
+    """
+    explicit = metadata not in (None, "")
+    mp = Path(metadata) if explicit else Path(png).with_suffix(".json")
+    if not mp.exists():
+        if explicit:
+            raise SpriteError(f"no such metadata file: {mp}")
+        return None
+    try:
+        data = json.loads(mp.read_text())
+    except ValueError as e:
+        if explicit:
+            raise SpriteError(f"cannot parse {mp}: {e}") from e
+        return None
+    frames = data.get("frames") if isinstance(data, dict) else None
+    if isinstance(frames, dict):  # Aseprite "hash" layout: {filename: {...}}
+        frames = [{"filename": k, **v} for k, v in frames.items()]
+    if not isinstance(frames, list) or not frames:
+        if explicit:
+            raise SpriteError(f"{mp} has no 'frames' list; not sprite sheet metadata")
+        return None
+    meta = data.get("meta") or {}
+    sprite_name = meta.get("name")
+    out_frames = []
+    for k, fr in enumerate(frames):
+        try:
+            r = fr["frame"]
+            rect = (int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"]))
+        except (KeyError, TypeError, ValueError):
+            raise SpriteError(f"{mp}: frame {k} has no usable 'frame' rectangle") from None
+        index = int(fr.get("index", k))
+        fname = fr.get("name")
+        if not fname:
+            fname = _frame_name_from_filename(str(fr.get("filename", "")), sprite_name, index) or f"frame{k}"
+        out_frames.append({"rect": rect, "name": fname, "duration": int(fr.get("duration", 100)), "index": index})
+    tags = []
+    for t in meta.get("frameTags") or []:
+        try:
+            tags.append(
+                {
+                    "name": str(t["name"]),
+                    "from": int(t["from"]),
+                    "to": int(t["to"]),
+                    "direction": t.get("direction", "forward"),
+                    "loop": str(t.get("repeat", "0")) in ("0", "None", ""),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    size = meta.get("size") or {}
+    try:
+        scale = int(float(meta.get("scale", 1)))
+    except (TypeError, ValueError):
+        scale = 1
+    return SheetMeta(
+        path=mp,
+        name=sprite_name,
+        frames=out_frames,
+        tags=tags,
+        palette=meta.get("palette") if isinstance(meta.get("palette"), dict) else None,
+        size=(int(size["w"]), int(size["h"])) if "w" in size and "h" in size else None,
+        scale=max(1, scale),
+    )
+
+
+def _frame_name_from_filename(filename: str, sprite_name: str | None, index: int) -> str | None:
+    """Recover ``f.name`` from ``"{sprite}_{index}_{f.name}"`` (best effort for old exports)."""
+    if not filename:
+        return None
+    if sprite_name and filename.startswith(f"{sprite_name}_{index}_"):
+        return filename[len(f"{sprite_name}_{index}_") :] or None
+    parts = filename.split(f"_{index}_", 1)
+    return parts[1] if len(parts) == 2 and parts[1] else None
+
+
 def import_png(
     path: str | Path,
     name: str | None = None,
@@ -306,17 +403,55 @@ def import_png(
     max_colors: int = 32,
     frame_width: int | None = None,
     frame_height: int | None = None,
+    meta: SheetMeta | None = None,
 ) -> Sprite:
     """Load a PNG into a sprite, assigning palette keys to distinct colors.
 
     If ``frame_width``/``frame_height`` are given the image is treated as a
-    sprite sheet and sliced into frames left-to-right, top-to-bottom.
+    sprite sheet and sliced into frames left-to-right, top-to-bottom. With
+    ``meta`` (see :func:`load_sheet_metadata`) the frames are cut from the
+    recorded rectangles instead (so padding and columns are honoured) and
+    frame names, durations, tags and the palette are restored.
     """
     p = Path(path)
     img = Image.open(p).convert("RGBA")
-    fw, fh = frame_width or img.width, frame_height or img.height
-    if img.width % fw or img.height % fh:
-        raise SpriteError(f"image {img.width}x{img.height} is not a multiple of frame size {fw}x{fh}")
+
+    tiles: list[tuple[tuple[int, int, int, int], str, int]] = []  # (crop box in image px, frame name, duration)
+    s = 1  # upscale factor of the sheet; each tile is shrunk back by it
+    if meta is not None:
+        if meta.size is not None and meta.size != img.size:
+            raise SpriteError(
+                f"{meta.path} describes a {meta.size[0]}x{meta.size[1]} sheet but {p.name} is {img.width}x{img.height}"
+            )
+        s = meta.scale
+        # padding is not scaled on export, so only the frame rectangles (not the
+        # whole sheet) are guaranteed to be multiples of the scale
+        for f in meta.frames:
+            if f["rect"][2] % s or f["rect"][3] % s:
+                raise SpriteError(
+                    f"{meta.path} says scale {s} but frame {f['name']!r} is {f['rect'][2]}x{f['rect'][3]}, not divisible by it"
+                )
+        sizes = {(r[2] // s, r[3] // s) for r in (f["rect"] for f in meta.frames)}
+        if len(sizes) != 1:
+            raise SpriteError(f"{meta.path}: frames have different sizes {sorted(sizes)}; cannot import as one sprite")
+        fw, fh = next(iter(sizes))
+        if (frame_width or fw) != fw or (frame_height or fh) != fh:
+            meta.notes.append(f"frame size {frame_width}x{frame_height} ignored; metadata says {fw}x{fh}")
+        for f in meta.frames:
+            x, y, w, h = f["rect"]
+            if x + w > img.width or y + h > img.height:
+                raise SpriteError(f"{meta.path}: frame {f['name']!r} rectangle lies outside the image")
+            tiles.append(((x, y, x + w, y + h), f["name"], f["duration"]))
+        if palette is None and meta.palette:
+            palette = Palette.from_json(meta.palette)
+        name = name or meta.name
+    else:
+        fw, fh = frame_width or img.width, frame_height or img.height
+        if img.width % fw or img.height % fh:
+            raise SpriteError(f"image {img.width}x{img.height} is not a multiple of frame size {fw}x{fh}")
+        for r in range(img.height // fh):
+            for c in range(img.width // fw):
+                tiles.append(((c * fw, r * fh, (c + 1) * fw, (r + 1) * fh), f"frame{len(tiles)}", 100))
 
     pal = palette or Palette()
     # count distinct opaque colors, quantize if too many
@@ -327,25 +462,41 @@ def import_png(
         img = q
 
     sprite = Sprite(name=name or p.stem, width=fw, height=fh, palette=pal)
-    cols, rows = img.width // fw, img.height // fh
-    for r in range(rows):
-        for c in range(cols):
-            tile = img.crop((c * fw, r * fh, (c + 1) * fw, (r + 1) * fh))
-            layer = Layer("base", fw, fh)
-            px = tile.load()
-            for y in range(fh):
-                for x in range(fw):
-                    rgba = px[x, y]
-                    if rgba[3] == 0:
-                        continue
-                    key = pal.key_for_rgba(rgba)
-                    if key is None:
-                        key = pal.free_key()
-                        from .model import format_color
+    used_names: set[str] = set()
+    for box, fname, duration in tiles:
+        tile = img.crop(box)
+        if s > 1:
+            tile = tile.resize((fw, fh), Image.Resampling.NEAREST)
+        layer = Layer("base", fw, fh)
+        px = tile.load()
+        for y in range(fh):
+            for x in range(fw):
+                rgba = px[x, y]
+                if rgba[3] == 0:
+                    continue
+                key = pal.key_for_rgba(rgba)
+                if key is None:
+                    key = pal.free_key()
+                    from .model import format_color
 
-                        pal.set(key, format_color(rgba))
-                    layer.grid[y][x] = key
-            sprite.frames.append(Frame(f"frame{len(sprite.frames)}", layers=[layer]))
+                    pal.set(key, format_color(rgba))
+                layer.grid[y][x] = key
+        if fname in used_names:
+            fname = Sprite._unique_name(fname, used_names)
+        used_names.add(fname)
+        sprite.frames.append(Frame(fname, duration_ms=max(1, duration), layers=[layer]))
     if not sprite.frames:
         sprite.frames.append(Frame("frame0", layers=[Layer("base", fw, fh)]))
+
+    if meta is not None:
+        pos = {f["index"]: k for k, f in enumerate(meta.frames)}
+        for t in meta.tags:
+            a, b = pos.get(t["from"]), pos.get(t["to"])
+            if a is None or b is None or a > b:
+                meta.notes.append(f"tag {t['name']!r} ({t['from']}..{t['to']}) does not map onto the imported frames; skipped")
+                continue
+            try:
+                sprite.set_tag(t["name"], a, b, t["direction"], t["loop"])
+            except SpriteError as e:
+                meta.notes.append(f"tag {t['name']!r} skipped: {e}")
     return sprite
