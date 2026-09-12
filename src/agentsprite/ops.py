@@ -372,6 +372,7 @@ def shift(
     region: Region = None,
     keys: Keys = None,
     overwrite: bool = False,
+    stats: dict[str, int] | None = None,
 ) -> int:
     """Translate the layer content by (dx, dy).
 
@@ -387,12 +388,16 @@ def shift(
     With ``wrap`` pixels wrap around the box (or the canvas when no region).
     With ``keys`` only pixels whose key is in that string move; the rest stay
     put (``overwrite`` then only moves transparency if ``.`` is in ``keys``).
+
+    Non-transparent pixels pushed off the canvas are lost; their count is added
+    to ``stats["dropped"]`` when a dict is passed.
     """
     x0, y0, x1, y1 = _box(layer, region)
     bw, bh = x1 - x0 + 1, y1 - y0 + 1
     sub = [row[:] for row in _extract(layer, (x0, y0, x1, y1))]
     clear(layer, (x0, y0, x1, y1), keys)
     n = 0
+    dropped = 0
     for sy, row in enumerate(sub):
         for sx, ch in enumerate(row):
             if not _selected(ch, keys):
@@ -402,7 +407,12 @@ def shift(
             nx, ny = sx + dx, sy + dy
             if wrap:
                 nx, ny = nx % bw, ny % bh
-            n += layer.set(x0 + nx, y0 + ny, ch)
+            if layer.set(x0 + nx, y0 + ny, ch):
+                n += 1
+            elif ch != TRANSPARENT_KEY:
+                dropped += 1
+    if stats is not None:
+        stats["dropped"] = stats.get("dropped", 0) + dropped
     return n
 
 
@@ -493,12 +503,17 @@ def outside_mask(layer: Layer) -> set[tuple[int, int]]:
 def outline(
     layer: Layer, palette: Palette, key: str, diagonal: bool = False, outer_only: bool = False
 ) -> int:
-    """Draw ``key`` on every transparent pixel adjacent to a non-transparent one.
+    """Draw ``key`` on every transparent pixel adjacent to a shape pixel.
+
+    Pixels that already hold ``key`` are not shape, so re-running the outline
+    after an edit is safe: it only fills in where the outline is missing and
+    never grows a second ring around the first.
 
     With ``outer_only`` enclosed gaps (holes, the space between legs) are left
     alone; only transparent pixels reachable from the canvas border are drawn.
     """
     _check_key(palette, key)
+    shape = lambda ch: ch != TRANSPARENT_KEY and ch != key  # noqa: E731
     steps = [(1, 0), (-1, 0), (0, 1), (0, -1)]
     if diagonal:
         steps += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
@@ -512,7 +527,7 @@ def outline(
                 continue
             for dx, dy in steps:
                 nx, ny = x + dx, y + dy
-                if layer.in_bounds(nx, ny) and layer.grid[ny][nx] != TRANSPARENT_KEY:
+                if layer.in_bounds(nx, ny) and shape(layer.grid[ny][nx]):
                     targets.append((x, y))
                     break
     for x, y in targets:

@@ -343,8 +343,10 @@ class Sprite:
         copy_from: str | int | None = None,
         at: int | None = None,
     ) -> Frame:
+        idx = len(self.frames) if at is None else max(0, min(at, len(self.frames)))
         if name is None:
-            name = self._unique_name("frame", [f.name for f in self.frames])
+            # name by the index the frame lands on (frame3 for [3]); skip taken names
+            name = self._unique_name("frame", [f.name for f in self.frames], start=idx)
         elif any(f.name == name for f in self.frames):
             raise SpriteError(f"frame {name!r} already exists")
 
@@ -359,7 +361,6 @@ class Sprite:
                 duration_ms=duration_ms,
                 layers=[Layer(ln, self.width, self.height) for ln in layer_names],
             )
-        idx = len(self.frames) if at is None else max(0, min(at, len(self.frames)))
         self.frames.insert(idx, frame)
         # tags follow their frames: a tag starting at/after the insertion point
         # shifts; one that spans the insertion point grows to include the new frame
@@ -440,8 +441,10 @@ class Sprite:
         if direction not in ("forward", "reverse", "pingpong"):
             raise SpriteError("direction must be forward, reverse or pingpong")
         n = len(self.frames)
-        if not (0 <= start <= end < n):
-            raise SpriteError(f"tag range {start}..{end} out of bounds for {n} frames")
+        if start > end:
+            raise SpriteError(f"tag range {start}..{end}: start > end")
+        if not (0 <= start and end < n):
+            raise SpriteError(f"tag range {start}..{end} out of bounds for {n} frames (0..{n - 1})")
         tag = Tag(name, start, end, direction, loop)
         for i, t in enumerate(self.tags):
             if t.name == name:
@@ -546,9 +549,9 @@ class Sprite:
     # -- helpers ----------------------------------------------------------- #
 
     @staticmethod
-    def _unique_name(prefix: str, existing: Iterable[str]) -> str:
+    def _unique_name(prefix: str, existing: Iterable[str], start: int = 0) -> str:
         taken = set(existing)
-        i = 0
+        i = start
         while f"{prefix}{i}" in taken:
             i += 1
         return f"{prefix}{i}"
@@ -564,12 +567,15 @@ def parse_grid(
 ) -> list[list[str]]:
     """Parse grid text into a list of rows of keys.
 
-    Blank lines and surrounding whitespace are ignored; spaces inside a row are
-    dropped so agents may write ``. . # #`` for readability.
+    Every line is a row: an empty or whitespace-only line is an all-``.`` row,
+    so leading blank lines push the drawing down (a grid whose first two lines
+    are empty starts at y=2). Only trailing blank lines are dropped. Spaces
+    inside a row are ignored so agents may write ``. . # #`` for readability.
     """
     lines = text.splitlines() if isinstance(text, str) else list(text)
     rows = [line.strip().replace(" ", "") for line in lines]
-    rows = [r for r in rows if r]
+    while rows and not rows[-1]:
+        rows.pop()
     if not rows:
         raise SpriteError("grid is empty")
     w = max(len(r) for r in rows)

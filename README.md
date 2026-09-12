@@ -123,7 +123,17 @@ Selecting what an edit touches:
   staff, cape, shadow) on its own layer before drawing; if you forgot, this
   is the fix.
 - `draw outline --outer` leaves enclosed gaps (between legs, inside rings)
-  open.
+  open. Re-running `draw outline` is safe: pixels already holding the outline
+  key are not shape, so a damaged outline is completed, never doubled.
+- Grid strings (`draw set`, `draw paste`) are one row per line; an empty or
+  whitespace-only line is an all-`.` row, so two leading blank lines start
+  the drawing at y=2. Only trailing blank lines are dropped.
+- Without `--layer` an edit lands on layer 0, the *bottom* layer (after
+  `layer add cape --at 0` that is the cape). The echo names the layer
+  whenever the frame has more than one.
+- `draw clear` echoes the pixels it removed (the before state), so a wrong
+  region is visible without a second `show`. `show -f 0..3` prints several
+  frames.
 - `draw replace FILE gGl rRw` recolors several keys in one pass (the
   characters pair up; MCP also takes `mapping={"g": "r", ...}`). Pairs apply
   simultaneously, so `gG Gg` swaps two keys.
@@ -138,6 +148,8 @@ Animation helpers:
 - `transform shift` with `--region` merges the moved pixels into the landing
   area by default (old pixels survive under transparent cells of the moved
   box); `--overwrite` makes the box's footprint replace what it lands on.
+  Pixels pushed off the canvas are lost and the summary line says so:
+  `(N pixels dropped at the canvas edge)`.
 - Tags follow their frames through `frame add --at`, `frame mv` and
   `frame rm`: a frame moved out of a tag's block leaves the tag, one dropped
   into the middle of a block joins it.

@@ -83,6 +83,23 @@ def _frames_str(frames: list[int]) -> str:
     return f"frame {frames[0]}" if len(frames) == 1 else f"frames {','.join(str(i) for i in frames)}"
 
 
+def _layer_str(sprite: Sprite, fi: int, layer: LayerRef, target: Layer) -> str:
+    """`` / layer 'name'`` when it matters: the layer was given, or the frame has several.
+
+    An edit without ``layer`` lands on layer 0, whatever that currently is
+    (after ``layer_add(at=0)`` it is the new bottom layer), so the echo always
+    says which layer it hit once there is a choice.
+    """
+    if layer is None and len(sprite.frames[fi].layers) == 1:
+        return ""
+    note = " (default: layer 0)" if layer is None else ""
+    return f" / layer {target.name!r}{note}"
+
+
+def _unique(items: list[int]) -> list[int]:
+    return list(dict.fromkeys(items))
+
+
 def _edit(
     path: str | Path,
     frame: FrameRef,
@@ -106,7 +123,7 @@ def _edit(
     for fi in frames:
         total += op(_target_layer(sprite, fi, layer), sprite)
     sprite.save(path)
-    msg = f"{what}: {total} pixels affected in {_frames_str(frames)}"
+    msg = f"{what}: {total} pixels affected in {_frames_str(frames)}{_layer_str(sprite, frames[0], layer, first)}"
     body = view.edit_result_text(sprite, frames[0], layer, before, first, mode)
     if body:
         msg += "\n" + body
@@ -160,10 +177,15 @@ def show(
     onion: str | int | None = None,
     onion_layer: str | int | None = None,
 ) -> str:
+    """Text view of one frame, or of several: ``frame`` takes the usual lists
+    (``"0..3"``, ``"1,3"``, ``"all"``) and prints each selected frame."""
     sprite = Sprite.load(path)
     if all_frames:
         return view.all_frames_text(sprite, layer)
-    return view.frame_text(sprite, frame, layer, ruler=ruler, onion=onion, onion_layer=onion_layer)
+    frames = _target_frames(sprite, frame)
+    return "\n\n".join(
+        view.frame_text(sprite, fi, layer, ruler=ruler, onion=onion, onion_layer=onion_layer) for fi in frames
+    )
 
 
 def diff(path: str | Path, a: FrameRef, b: FrameRef, layer: LayerRef = None, limit: int = 0) -> str:
@@ -678,7 +700,7 @@ def _move_region(
     if to_layer is not None and to_layer != from_layer:
         dst_desc += f" layer {first_dst.name!r}"
     msg = (
-        f"{what}{_region_str(region)}{_keys_str(keys)} from {_frames_str([sf for sf, _ in pairs])}"
+        f"{what}{_region_str(region)}{_keys_str(keys)} from {_frames_str(_unique([sf for sf, _ in pairs]))}"
         f" -> ({x},{y}) {dst_desc}: {total} pixels affected"
     )
     body = view.edit_result_text(sprite, view_fi, dst_layer_ref, before, first_dst, mode)
@@ -772,15 +794,21 @@ def shift(
 ) -> str:
     """Translate content. Moved pixels merge into the landing area unless
     ``overwrite`` (then the box's transparent pixels move too and replace
-    what they land on)."""
-    return _edit(
+    what they land on). Pixels pushed off the canvas are lost and the summary
+    line says how many (``(N pixels dropped at the canvas edge)``)."""
+    stats: dict[str, int] = {}
+    msg = _edit(
         path,
         frame,
         layer,
-        lambda l, s: ops.shift(l, dx, dy, wrap, region, keys, overwrite),
+        lambda l, s: ops.shift(l, dx, dy, wrap, region, keys, overwrite, stats),
         f"shift ({dx},{dy}){_region_str(region)}{_keys_str(keys)}{' overwrite' if overwrite else ''}",
         show,
     )
+    if stats.get("dropped"):
+        head, _, rest = msg.partition("\n")
+        msg = f"{head} ({stats['dropped']} pixels dropped at the canvas edge)" + (f"\n{rest}" if rest else "")
+    return msg
 
 
 def stretch(

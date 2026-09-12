@@ -64,9 +64,12 @@ Workflow
 
 Coordinates: 0-based, x to the right, y down. Ranges are inclusive.
 Frame refs: index ("0"), name ("idle1"), "all", a range ("0..2") or a
-comma-separated list ("1,3"). Layer refs: index or name (default layer 0).
-Grid strings: rows separated by newlines; spaces inside a row are ignored;
-short rows are padded with '.'. sprite_info lists per-layer pixel counts
+comma-separated list ("1,3"). Layer refs: index or name. Without `layer` an
+edit lands on layer 0 = the BOTTOM layer, whatever that is after layer_add(at=0);
+the echo names the layer whenever there is more than one, so check it.
+Grid strings: one row per line; spaces inside a row are ignored; short rows
+are padded with '.'; an empty line is an all-'.' row (two leading blank
+lines start the drawing at y=2). sprite_info lists per-layer pixel counts
 and keys so you can see which layer holds what.
 
 Tips for good pixel art
@@ -161,6 +164,7 @@ def sprite_show(
     onion_layer: Optional[str] = None,
 ) -> str:
     """Show a frame as a text grid with x/y rulers. Omit `layer` for the composite of visible layers.
+    `frame` may be an index, name, "all", "0..2" or "1,3"; several frames are printed one after another.
 
     `onion` = "prev" | "next" | frame index/name draws that frame's silhouette underneath as
     ghost markers (') wherever this frame is transparent, to check animation alignment.
@@ -263,7 +267,7 @@ def frame_add(
     """Append a frame (or insert at `at`). `copy_from` duplicates an existing frame's pixels.
 
     `count` adds that many frames at once (e.g. copy_from="0", count=3 for a 4-frame idle);
-    with a `name` they are named name0, name1, ..."""
+    with a `name` they are named name0, name1, ...; without one, frameN after the index they land on."""
     return _wrap(api.frame_add, path, name, duration_ms, copy_from, at, count)
 
 
@@ -335,7 +339,8 @@ def tag_remove(path: str, name: str) -> str:
 
 @tool()
 def draw_set(path: str, grid: str, frame: str = "0", layer: Optional[str] = None, show: str = "bbox") -> str:
-    """Replace a whole layer with a grid of palette keys (rows separated by newlines; short rows padded with '.').
+    """Replace a whole layer with a grid of palette keys (one row per line; short rows padded with '.';
+    an empty line is an all-'.' row, so leading blank lines move the drawing down).
 
     `show` = "bbox" (default: only the box around the changed pixels, with absolute rulers) |
     "full" (whole frame) | "none". `frame` may be an index, name, "all", "0..2" or "1,3"."""
@@ -353,7 +358,7 @@ def draw_paste(
     layer: Optional[str] = None,
     show: str = "bbox",
 ) -> str:
-    """Stamp a grid of keys with its top-left at (x, y). '.' cells are skipped unless overwrite=True.
+    """Stamp a grid of keys with its top-left at (x, y). '.' cells (and empty lines) are skipped unless overwrite=True.
 
     Good for batching unrelated pixel edits into one call (sparse grid of mostly '.').
 
@@ -471,6 +476,8 @@ def draw_outline(
 ) -> str:
     """Add a 1px outline of `key` around all non-transparent pixels.
 
+    Safe to re-run after an edit: pixels already equal to `key` are not treated as shape,
+    so an existing outline is completed, never doubled.
     outer_only=True leaves enclosed gaps (holes, space between legs/arms) untouched
     and only outlines pixels reachable from the canvas border.
 
@@ -491,6 +498,7 @@ def draw_clear(
     """Erase a layer (or only `region` = [x0, y0, x1, y1], inclusive) to transparent.
 
     `keys` = "ab" erases only pixels with those keys (e.g. remove the staff, keep the body).
+    The echo grid shows the pixels that were removed (the before state).
 
     `show` = "bbox" (default: only the box around the changed pixels, with absolute rulers) |
     "full" (whole frame) | "none". `frame` may be an index, name, "all", "0..2" or "1,3"."""
@@ -595,7 +603,8 @@ def transform_shift(
     show: str = "bbox",
     overwrite: bool = False,
 ) -> str:
-    """Translate layer content by (dx, dy). Pixels leaving the canvas are lost unless wrap=True.
+    """Translate layer content by (dx, dy). Pixels leaving the canvas are lost unless wrap=True;
+    the summary line then says "(N pixels dropped at the canvas edge)".
 
     With `region` = [x0, y0, x1, y1] only pixels inside the box move (e.g. shift just the
     torso down by 1 while the feet stay put); they may land outside the box. The moved pixels

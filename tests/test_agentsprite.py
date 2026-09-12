@@ -36,9 +36,22 @@ def test_palette_reserved_transparent():
 
 def test_parse_grid_pads_and_strips_spaces():
     g = parse_grid("a b\n\n  cd  \n", 4, 3)
-    assert g == [list("ab.."), list("cd.."), list("....")]
+    assert g == [list("ab.."), list("...."), list("cd..")]  # the blank line is a row
     with pytest.raises(SpriteError):
         parse_grid("abcde", 4, 1)
+
+
+def test_parse_grid_blank_lines_are_rows():
+    # session 4: two leading empty lines must put the drawing at y=2, not y=0
+    g = parse_grid("\n\nab", 4, 4)
+    assert g == [list("...."), list("...."), list("ab.."), list("....")]
+    # whitespace-only lines too; only trailing blank lines are dropped
+    g = parse_grid("   \nab\n\n\n")
+    assert g == [list(".."), list("ab")]
+    with pytest.raises(SpriteError, match="grid is empty"):
+        parse_grid("\n  \n")
+    with pytest.raises(SpriteError, match="rows but canvas"):
+        parse_grid("\n\n\nab", 4, 3)
 
 
 def test_sprite_roundtrip(tmp_path: Path):
@@ -134,7 +147,8 @@ def test_outline_and_transforms(canvas):
     s, l = canvas
     ops.rect(l, s.palette, 3, 3, 4, 4, "r", fill=True)
     assert ops.outline(l, s.palette, "k") == 8
-    assert ops.outline(l, s.palette, "k", diagonal=True) == 20  # 8-connected ring around the plus shape
+    assert ops.outline(l, s.palette, "k") == 0  # idempotent: the outline is not shape
+    assert ops.outline(l, s.palette, "k", diagonal=True) == 4  # only the 4 corners of the 8-ring are missing
     ops.clear(l)
     l.grid[0][0] = "r"
     ops.flip(l, "h")
@@ -1238,3 +1252,112 @@ def test_mcp_session3_tools(tmp_path: Path):
         assert r.content[0].text == "resized 8x8 -> 10x10 (anchor center; content moved by (+1,+1))"
 
     asyncio.run(go())
+
+
+# --------------------------------------------------------------------------- #
+# dogfooding session 4 bugs
+# --------------------------------------------------------------------------- #
+
+
+def test_outline_rerun_completes_instead_of_doubling(canvas):
+    # cape scenario: the left column of the outline was lost, re-outline must only fill it back in
+    s, l = canvas
+    ops.rect(l, s.palette, 2, 2, 5, 5, "r", fill=True)
+    ops.outline(l, s.palette, "k")
+    before = [row[:] for row in l.grid]
+    ops.clear(l, (1, 1, 1, 6))  # lose the left outline column (4 pixels; a 4-connected ring has no corners)
+    assert ops.outline(l, s.palette, "k") == 4
+    assert l.grid == before
+    assert ops.outline(l, s.palette, "k", outer_only=True) == 0
+    assert l.grid[0][0] == "." and l.grid[7][7] == "."  # no second ring
+
+
+def test_frame_add_names_follow_index(tmp_path: Path):
+    p = tmp_path / "n.sprite.json"
+    api.new(p, 2, 2)
+    api.frame_update(p, "0", name="contact_a")
+    out = api.frame_add(p, copy_from="0", count=3)
+    assert out.startswith("added 3 frames: [1] frame1, [2] frame2, [3] frame3")
+    api.frame_add(p, at=1)  # lands on [1]; frame1 is taken so the next free number is used
+    assert [f.name for f in Sprite.load(p).frames] == ["contact_a", "frame4", "frame1", "frame2", "frame3"]
+
+
+def test_tag_set_start_after_end_message(tmp_path: Path):
+    p = tmp_path / "t.sprite.json"
+    api.new(p, 2, 2)
+    api.frame_add(p, count=7)
+    with pytest.raises(SpriteError, match=r"tag range 5\.\.2: start > end"):
+        api.tag_set(p, "walk", 5, 2)
+    with pytest.raises(SpriteError, match=r"out of bounds for 8 frames \(0\.\.7\)"):
+        api.tag_set(p, "walk", 6, 8)
+    api.tag_set(p, "walk", 0, 7)
+
+
+def test_show_accepts_frame_lists(tmp_path: Path):
+    p = tmp_path / "s.sprite.json"
+    api.new(p, 2, 2)
+    api.frame_add(p, count=2)
+    out = api.show(p, "0..1")
+    assert out.count("frame [") == 2 and "frame [0] frame0" in out and "frame [1] frame1" in out
+    assert api.show(p, "0,2").count("frame [") == 2
+    with pytest.raises(SpriteError, match="frame index 9 out of range"):
+        api.show(p, "0..9")
+    assert "onion: frame [0]" in api.show(p, "1,2", onion="prev")
+
+
+def test_draw_copy_echo_names_source_once(tmp_path: Path):
+    p = tmp_path / "c.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"k": "#000"})
+    api.frame_add(p, count=2)
+    api.draw_pixels(p, [(0, 0)], "k", frame="1")
+    out = api.draw_copy(p, (0, 0, 1, 1), 0, 1, from_frame="1", to_frame="0,2")
+    assert out.startswith("copy region(0,0,1,1) from frame 1 -> (0,1) frames 0,2: 2 pixels affected")
+
+
+def test_clear_echo_shows_removed_pixels(tmp_path: Path):
+    p = tmp_path / "e.sprite.json"
+    api.new(p, 6, 4)
+    api.palette_set_many(p, {"k": "#000", "r": "#f00"})
+    api.draw_set(p, "kkrr..\nkkrr..\n......")
+    out = api.draw_clear(p, region=(1, 0, 2, 1))
+    lines = out.splitlines()
+    assert lines[0] == "clear region(1,0,2,1): 4 pixels affected in frame 0"
+    assert lines[1].startswith("removed: x=1..2 y=0..1 (4 pixels) in frame [0] frame0; grid = the erased pixels")
+    assert lines[3:] == ["0 kr", "1 kr"]
+    assert Sprite.load(p).frames[0].layers[0].rows()[0] == "k..r.."
+    # keyed erase inside a mixed box: the changed-cells grid shows the removed keys too
+    out = api.draw_clear(p, keys="r")
+    assert "removed: x=3..3 y=0..1 (2 pixels)" in out and out.splitlines()[-1] == "1 r"
+
+
+def test_shift_reports_dropped_pixels(tmp_path: Path):
+    p = tmp_path / "d.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"k": "#000"})
+    api.draw_set(p, "kk..\nkk..\n....\n....")
+    out = api.shift(p, -1, 0)
+    assert out.splitlines()[0] == "shift (-1,0): 2 pixels affected in frame 0 (2 pixels dropped at the canvas edge)"
+    assert "(dropped" not in api.shift(p, 1, 0)
+    assert "dropped" not in api.shift(p, 3, 0, wrap=True)
+    stats: dict[str, int] = {}
+    s = Sprite.new("x", 4, 4)
+    s.palette.set("k", "#000")
+    l = s.frames[0].layers[0]
+    ops.paste(l, s.palette, "kk\nkk", 0, 0)
+    ops.shift(l, 0, -1, region=(0, 0, 3, 1), stats=stats)
+    assert stats == {"dropped": 2}
+
+
+def test_edit_echo_names_default_layer_when_several(tmp_path: Path):
+    p = tmp_path / "l.sprite.json"
+    api.new(p, 4, 4)
+    api.palette_set_many(p, {"k": "#000"})
+    assert api.draw_pixels(p, [(0, 0)], "k").splitlines()[0] == "pixels 'k': 1 pixels affected in frame 0"
+    api.layer_add(p, "cape", at=0)
+    out = api.draw_pixels(p, [(1, 1)], "k")
+    assert out.splitlines()[0] == "pixels 'k': 1 pixels affected in frame 0 / layer 'cape' (default: layer 0)"
+    assert "in frame [0] frame0 / layer 'cape'" in out.splitlines()[1]
+    assert Sprite.load(p).frames[0].layer("cape").grid[1][1] == "k"
+    out = api.draw_pixels(p, [(2, 2)], "k", layer="base")
+    assert out.splitlines()[0] == "pixels 'k': 1 pixels affected in frame 0 / layer 'base'"

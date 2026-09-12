@@ -186,41 +186,63 @@ time.
 
 Bugs / gotchas
 
-- [ ] **Blank lines in grid strings are dropped** *(current code)*.
+- [x] **Blank lines in grid strings are dropped** *(current code)*.
       `draw_set` with two leading empty lines put the head at y=0 instead
       of y=2 (a legs grid that used `.` placeholder rows landed right).
       An empty line should be an all-`.` row; only strip the trailing
       newline. Same for whitespace-only lines.
-- [ ] **`draw_outline` is not idempotent** *(current code)*. After a
+      Fixed in `parse_grid`: every line is a row (empty / whitespace-only
+      = all `.`); only trailing blank lines are dropped.
+- [x] **`draw_outline` is not idempotent** *(current code)*. After a
       shift lost the cape's left outline at the canvas edge and a resize
       made room, re-running `draw_outline` outlined the existing outline
       (33 new `k` pixels, 2px border). Pixels already equal to `key`
       should not count as shape, so "re-outline after an edit" becomes a
       safe normal step. Recovering took clear + copy-from-frame + re-shift.
-- [ ] **Default layer is index 0, whatever that is.** After
+      Fixed: `ops.outline` ignores pixels already equal to `key` when
+      looking for shape; a second run reports `0 pixels affected`.
+- [x] **Default layer is index 0, whatever that is.** After
       `layer_add("cape", at=0)` a `draw_pixels` without `layer` silently
       drew on the cape, and the echo (`in frame [0] contact_a`) did not
       say which layer it hit. At minimum always name the layer in the
       echo when there is more than one; better, default to the top layer
       or remember an active layer per file.
-- [ ] **Auto frame names disagree with indices** *(current code)*. With
+      Done (the minimum): the summary line and the bbox head name the
+      layer whenever the frame has more than one, with
+      `(default: layer 0)` when no layer was given; the bbox grid shows
+      the edited layer rather than the composite. The default itself is
+      still layer 0 (guide now spells out that this is the bottom layer).
+- [x] **Auto frame names disagree with indices** *(current code)*. With
       frame 0 renamed `contact_a`, `frame_add(copy_from=0, count=3)`
       produced `[1] frame0, [2] frame1, [3] frame2`. Name by index
       (`frame1..3`), skipping taken names.
-- [ ] **Misleading errors** *(current code)*: `sprite_show(frame="0..9")`
+      Fixed in `Sprite.add_frame`: the candidate is `frame<index>` and
+      counts up past taken names.
+- [x] **Misleading errors** *(current code)*: `sprite_show(frame="0..9")`
       -> `no frame named '0..9'` (show takes a single frame; say so, or
       accept lists and print each). `tag_set(start=5, end=2)` ->
       `out of bounds for 8 frames` although both are in bounds; say
       `start > end`.
-- [ ] **`draw_copy` echo repeats the source**: `from frames 1,1 -> (0,1)
-      frames 0,2` (once per target frame).
-- [ ] **Clear echo is all dots.** The bbox grid after `draw_clear` shows
+      Fixed: `show` accepts frame lists/ranges and prints each frame
+      (`0..9` now errors with `frame index 9 out of range (have 8)`);
+      `set_tag` says `tag range 5..2: start > end`, and the bounds error
+      lists the valid range `(0..7)`.
+- [x] **`draw_copy` echo repeats the source**: `from frames 1,1 -> (0,1)
+      frames 0,2` (once per target frame). Fixed: sources are listed once.
+- [x] **Clear echo is all dots.** The bbox grid after `draw_clear` shows
       only `.`; show the keys that were removed (before-state) so a
       wrong region is visible without a second `sprite_show`.
-- [ ] **Silent edge loss.** A region shift that pushes pixels off the
+      Fixed in `edit_result_text`: when every changed cell is now
+      transparent the head reads `removed: ... grid = the erased pixels
+      (before the edit)` and the grid (and changed-cells mask) show the
+      before state. Applies to any erase-only edit (`draw_clear`, keyed
+      clears, `draw_replace` to `.`).
+- [x] **Silent edge loss.** A region shift that pushes pixels off the
       canvas drops them without a word (documented, but I only noticed
       because the outline vanished). Echo `(N pixels dropped at the
-      canvas edge)`.
+      canvas edge)`. Fixed: `ops.shift` counts dropped non-transparent
+      pixels (`stats=` dict) and `transform_shift` appends the note to
+      its summary line.
 
 Workflow requests
 
@@ -244,6 +266,3 @@ Workflow requests
 - [ ] **Cross-file diff.** Verifying the sheet round trip needed a Python
       script because `sprite_diff` only compares frames inside one file.
       `sprite_diff(path, frame_a, frame_b, other_path=...)`.
-- [ ] **Report the running build.** Print the package version (and the
-      source mtime or git short hash when run from a checkout) in
-      `guide()` and `sprite_info`, so a stale server is obvious.

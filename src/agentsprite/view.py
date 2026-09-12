@@ -245,10 +245,18 @@ def edit_result_text(
 
     ``before`` is a snapshot of the edited layer's grid and ``after`` the layer
     itself. ``show`` is ``"none"`` (nothing), ``"bbox"`` (the box around the
-    changed pixels, with absolute rulers; when not every cell in that box
-    changed, a second grid beside it shows only the changed cells so that e.g.
-    4 ``g`` pixels set inside a ``g`` area are still visible) or ``"full"``
-    (the whole frame with legend and bbox as :func:`frame_text`).
+    changed pixels of the edited layer, with absolute rulers; when not every
+    cell in that box changed, a second grid beside it shows only the changed
+    cells so that e.g. 4 ``g`` pixels set inside a ``g`` area are still
+    visible) or ``"full"`` (the whole frame with legend and bbox as
+    :func:`frame_text`).
+
+    When every changed cell is now transparent (a clear, a keyed erase) the
+    grid shows the *before* state instead, so the keys that were removed are
+    visible without a second ``show``.
+
+    The layer is named whenever the frame has more than one, even if the edit
+    used the default (layer 0).
     """
     mode = show_mode(show)
     if mode == "none":
@@ -259,18 +267,30 @@ def edit_result_text(
     if box is None:
         return "(no pixels changed)"
     frame = sprite.frames[fi]
-    layer = _view_layer(sprite, frame, layer_ref)
     x0, y0, x1, y1 = box
-    where = f"frame [{fi}] {frame.name}" + ("" if layer_ref is None else f" / layer {layer.name!r}")
-    head = f"changed: x={x0}..{x1} y={y0}..{y1} ({changed} pixels) in {where}; show=\"full\" for the whole {sprite.width}x{sprite.height} frame"
+    where = f"frame [{fi}] {frame.name}"
+    if layer_ref is not None or len(frame.layers) > 1:
+        where += f" / layer {after.name!r}"
+    cells = [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1) if before[y][x] != after.grid[y][x]]
+    erased = all(after.grid[y][x] == TRANSPARENT_KEY for x, y in cells)
+    shown = after
+    if erased:
+        shown = Layer("before", sprite.width, sprite.height, grid=[row[:] for row in before])
+        head = f"removed: x={x0}..{x1} y={y0}..{y1} ({changed} pixels) in {where}; grid = the erased pixels (before the edit)"
+    else:
+        head = f"changed: x={x0}..{x1} y={y0}..{y1} ({changed} pixels) in {where}"
+    head += f"; show=\"full\" for the whole {sprite.width}x{sprite.height} frame"
     if changed == (x1 - x0 + 1) * (y1 - y0 + 1):
-        return head + "\n" + region_text(layer, box)
+        return head + "\n" + region_text(shown, box)
     mask = Layer("mask", sprite.width, sprite.height)
+    for x, y in cells:
+        mask.grid[y][x] = shown.grid[y][x]
     for y in range(y0, y1 + 1):
         for x in range(x0, x1 + 1):
-            mask.grid[y][x] = after.grid[y][x] if before[y][x] != after.grid[y][x] else MASK_BLANK
+            if before[y][x] == after.grid[y][x]:
+                mask.grid[y][x] = MASK_BLANK
     head += "; right grid = changed cells only"
-    return head + "\n" + _side_by_side(region_text(layer, box), region_text(mask, box), len(str(y1)) + 1)
+    return head + "\n" + _side_by_side(region_text(shown, box), region_text(mask, box), len(str(y1)) + 1)
 
 
 def _side_by_side(left: str, right: str, prefix: int) -> str:
