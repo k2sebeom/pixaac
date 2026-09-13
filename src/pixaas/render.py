@@ -128,11 +128,9 @@ def build_sheet(
     game-engine importers can consume it.
     """
     indices = sprite.tag(tag).frame_indices() if tag else list(range(len(sprite.frames)))
-    # de-duplicate pingpong repeats for packing, keep the order of first appearance
-    seen: list[int] = []
-    for i in indices:
-        if i not in seen:
-            seen.append(i)
+    # Packing is always in source order; tags describe playback separately.
+    seen = sorted(set(indices))
+    positions = {source: position for position, source in enumerate(seen)}
     n = len(seen)
     cols = columns or n
     cols = max(1, min(cols, n))
@@ -154,7 +152,8 @@ def build_sheet(
             {
                 "filename": f"{sprite.name}_{fi}_{f.name}",
                 "name": f.name,
-                "index": fi,
+                "index": k,
+                "sourceIndex": fi,
                 "frame": {"x": x, "y": y, "w": fw, "h": fh},
                 "rotated": False,
                 "trimmed": False,
@@ -168,7 +167,8 @@ def build_sheet(
         "frames": frames_meta,
         "meta": {
             "app": "pixaas",
-            "version": "0.1",
+            "version": "0.2",
+            "tagIndexSpace": "exported",
             "name": sprite.name,
             "format": "RGBA8888",
             "size": {"w": sheet_w, "h": sheet_h},
@@ -178,7 +178,7 @@ def build_sheet(
             "rows": rows,
             "padding": padding,
             "frameTags": [
-                {"name": t.name, "from": t.start, "to": t.end, "direction": t.direction, "repeat": "0" if t.loop else "1"}
+                {"name": t.name, "from": positions[t.start], "to": positions[t.end], "direction": t.direction, "repeat": "0" if t.loop else "1"}
                 for t in sprite.tags
                 if tag is None or t.name == tag
             ],
@@ -315,6 +315,7 @@ class SheetMeta:
     size: tuple[int, int] | None
     scale: int = 1
     notes: list[str] = field(default_factory=list)
+    tag_index_space: str = "exported"
 
 
 def load_sheet_metadata(png: str | Path, metadata: str | Path | None = None) -> SheetMeta | None:
@@ -357,6 +358,12 @@ def load_sheet_metadata(png: str | Path, metadata: str | Path | None = None) -> 
         if not fname:
             fname = _frame_name_from_filename(str(fr.get("filename", "")), sprite_name, index) or f"frame{k}"
         out_frames.append({"rect": rect, "name": fname, "duration": int(fr.get("duration", 100)), "index": index})
+    # Old PixaaS sheets used source indices and packed reverse tags backwards.
+    # Normalize their frames to source order before resolving tag endpoints.
+    legacy = (meta.get("app") == "pixaas" and "tagIndexSpace" not in meta
+              and all("index" in fr for fr in frames))
+    if legacy:
+        out_frames.sort(key=lambda fr: fr["index"])
     tags = []
     for t in meta.get("frameTags") or []:
         try:
@@ -384,6 +391,7 @@ def load_sheet_metadata(png: str | Path, metadata: str | Path | None = None) -> 
         palette=meta.get("palette") if isinstance(meta.get("palette"), dict) else None,
         size=(int(size["w"]), int(size["h"])) if "w" in size and "h" in size else None,
         scale=max(1, scale),
+        tag_index_space="source" if legacy else "exported",
     )
 
 
@@ -490,7 +498,8 @@ def import_png(
         sprite.frames.append(Frame("frame0", layers=[Layer("base", fw, fh)]))
 
     if meta is not None:
-        pos = {f["index"]: k for k, f in enumerate(meta.frames)}
+        pos = {(f["index"] if meta.tag_index_space == "source" else k): k
+               for k, f in enumerate(meta.frames)}
         for t in meta.tags:
             a, b = pos.get(t["from"]), pos.get(t["to"])
             if a is None or b is None or a > b:
