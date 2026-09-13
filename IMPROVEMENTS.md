@@ -42,14 +42,14 @@ round trips continue to work.
 During the trial, checking proportions required exporting and opening images.
 A local preview should keep the Python script as the source of truth.
 
-- [ ] Add a documented watch command that reruns an authoring script and refreshes
+- [x] Add a documented watch command that reruns an authoring script and refreshes
   a preview when the script or its local art modules change.
-- [ ] Provide nearest-neighbor zoom and a transparency checkerboard.
-- [ ] Add play/pause, frame stepping, frame names, and duration display.
-- [ ] Show script errors while retaining the last successful preview.
-- [ ] Document how scripts expose preview assets and how to select among
+- [x] Provide nearest-neighbor zoom and a transparency checkerboard.
+- [x] Add play/pause, frame stepping, frame names, and duration display.
+- [x] Show script errors while retaining the last successful preview.
+- [x] Document how scripts expose preview assets and how to select among
   multiple sprites.
-- [ ] Keep preview tooling optional so ordinary scripts and build jobs remain
+- [x] Keep preview tooling optional so ordinary scripts and build jobs remain
   lightweight.
 
 **Acceptance criteria:** After starting preview once, a user can change a shape,

@@ -74,10 +74,8 @@ def build_robot(*, armor: str = "#e8833e", name: str = "bolt") -> Sprite:
     return robot
 
 
-def build(output: Path) -> None:
+def build_idle_robot() -> Sprite:
     robot = build_robot()
-    robot.export_png(output / "bolt.png")
-    robot.export_png(output / "bolt-preview.png", scale=12, background="#243342")
     robot.frame().duration_ms = 200
     up = robot.add_frame("up", copy_from=0, duration_ms=140)
     up.layer("head").shift(0, -1)
@@ -87,6 +85,21 @@ def build(output: Path) -> None:
     for x in (11, 16):
         face.line((x, 9), (x + 1, 9), "c")
     robot.tag("idle", 0, 2, direction="pingpong")
+    return robot
+
+
+def preview_assets() -> dict[str, Sprite]:
+    robot = build_idle_robot()
+    ice = robot.copy(name="bolt-ice")
+    ice.palette.set("o", "#468fb5")
+    ice.palette.set("y", "#9de1ed")
+    return {"bolt": robot, "ice": ice}
+
+
+def build(output: Path) -> None:
+    robot = build_idle_robot()
+    robot.export_png(output / "bolt.png")
+    robot.export_png(output / "bolt-preview.png", scale=12, background="#243342")
     robot.export_apng(output / "bolt-idle.png", tag="idle", scale=8)
     robot.export_gif(output / "bolt-idle.gif", tag="idle", scale=8, background="#243342")
     for name, armor, highlight in (("ice", "#468fb5", "#9de1ed"),

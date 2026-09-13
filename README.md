@@ -58,6 +58,46 @@ uv run pytest
 Pillow is the only runtime dependency. PixaaS runs locally and works in scripts,
 notebooks, build jobs, and agent coding environments.
 
+## Watch a live preview
+
+```bash
+python -m pixaas.preview examples/robot.py --sprite bolt
+# With uv: uv run python -m pixaas.preview examples/robot.py
+```
+
+Open the printed local URL (normally <http://127.0.0.1:8765>) once. Save changes
+to shapes, palettes, or frame durations and the preview refreshes automatically.
+Select a sprite or animation tag, play/pause, step frames, or choose a
+nearest-neighbor zoom. Transparency appears over a checkerboard; frame names
+and durations are displayed below the image. A failed script shows its traceback
+while keeping the last successful images. Fix it and save to resume updates.
+
+Expose a module-level `preview_assets` value or a zero-argument function:
+
+```python
+def preview_assets():
+    return {"bolt": robot, "ice": ice}  # Or return one Sprite directly.
+```
+
+The [robot script](examples/robot.py) builds these assets in the function.
+The watcher executes your script in a fresh Python process on each rebuild,
+with the script's directory on the import path. Its `if __name__ == "__main__":`
+block is skipped, so put batch exports there and expose preview assets outside
+that block. Top-level code still runs; keep expensive or unrelated side effects
+inside the main block too. Preview is for your own authoring scripts.
+
+Python files under the working directory are watched when the script lives
+there; otherwise its containing directory is watched. This includes local art
+modules, new files, and deletions. Generated `out/`, virtual environments, build
+folders, and hidden directories are skipped. Add other source locations with
+repeatable `--watch ../shared-art` options. Non-Python inputs can be watched by
+passing their individual file paths. `--sprite ice` selects an initial asset;
+`--port 9000` changes the port. Builds time out after 30 seconds.
+
+Preview is optional, binds only to localhost, and uses Python's standard library
+plus the existing Pillow dependency. Ordinary SDK imports start no server or
+watcher. Stop it with Ctrl-C; the Python script remains the source of truth.
+
 ## The programming model
 
 | Object | Purpose |
