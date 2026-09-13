@@ -1,4 +1,4 @@
-"""High-level, file-oriented operations shared by the CLI and the MCP server.
+"""High-level, file-oriented operations for saved sprite documents.
 
 Every function takes a sprite file path, performs one change, saves, and
 returns a human/agent-readable string describing the result (usually including
@@ -23,7 +23,7 @@ SHOW_DEFAULT = "bbox"
 
 
 def parse_region(text: str | None) -> Region:
-    """Parse ``"x0,y0,x1,y1"`` (CLI form) into a region tuple."""
+    """Parse ``"x0,y0,x1,y1"`` into a region tuple."""
     if text is None or text == "":
         return None
     parts = [p for p in text.replace(" ", "").split(",") if p]
@@ -958,7 +958,7 @@ def render_bytes(
     checker: bool = False,
     layer: LayerRef = None,
 ) -> bytes:
-    """PNG bytes of one frame (for MCP image previews)."""
+    """PNG bytes of one frame for image previews."""
     import io
 
     sprite = Sprite.load(path)

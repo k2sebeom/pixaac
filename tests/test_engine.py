@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from agentsprite import api, ops, render, view
-from agentsprite.model import Palette, Sprite, SpriteError, parse_color, parse_grid
+from pixaas import api, ops, render, view
+from pixaas.model import Palette, Sprite, SpriteError, parse_color, parse_grid
 
 
 # --------------------------------------------------------------------------- #
@@ -430,7 +430,7 @@ def test_api_draw_copy_and_region(tmp_path: Path):
 
 
 # --------------------------------------------------------------------------- #
-# onion skin, presets, palette reuse, apng, mcp plain text
+# onion skin, presets, palette reuse, apng
 # --------------------------------------------------------------------------- #
 
 
@@ -466,7 +466,7 @@ def test_onion_skin_view(tmp_path: Path):
 
 
 def test_palette_presets(tmp_path: Path):
-    from agentsprite import presets
+    from pixaas import presets
 
     p = tmp_path / "p.sprite.json"
     api.new(p, 4, 4)
@@ -548,55 +548,8 @@ def test_export_apng(tmp_path: Path):
     assert im2.convert("RGBA").getpixel((3, 3)) == (255, 255, 255, 255)
 
 
-def test_mcp_tools_return_plain_text(tmp_path: Path):
-    import asyncio
-
-    from agentsprite import server
-
-    p = str(tmp_path / "m.sprite.json")
-
-    async def go():
-        r = await server.mcp.call_tool("sprite_new", {"path": p, "width": 4, "height": 2})
-        assert r.structured_content is None
-        assert r.content[0].type == "text" and "created" in r.content[0].text
-        r = await server.mcp.call_tool("palette_preset", {"path": p, "name": "1bit"})
-        assert "k  #000000" in r.content[0].text
-        r = await server.mcp.call_tool("draw_set", {"path": p, "grid": "kw..\n..wk"})
-        assert r.structured_content is None
-        assert "\n0 kw..   kw\n1 ..wk     wk" in r.content[0].text  # real newlines, not escaped
-        r = await server.mcp.call_tool("sprite_show", {"path": p, "frame": "0", "onion": "prev"})
-        assert r.content[0].text.startswith("error: frame [0] has no previous frame")
-        r = await server.mcp.call_tool("export_apng", {"path": p, "out": str(tmp_path / "m.png")})
-        assert "APNG" in r.content[0].text
-        r = await server.mcp.call_tool("preview", {"path": p})
-        assert r.content[0].type == "image" and r.structured_content is None
-        tools = {t.name for t in (await server.mcp.list_tools())}
-        assert {"palette_preset", "palette_presets", "export_apng"} <= tools
-
-    asyncio.run(go())
 
 
-def test_mcp_concurrent_edits_do_not_lose_writes(tmp_path: Path):
-    import asyncio
-
-    from agentsprite import server
-
-    p = str(tmp_path / "race.sprite.json")
-    api.new(p, 16, 16)
-    api.palette_set_many(p, {"k": "#000"})
-
-    async def go():
-        calls = [
-            server.mcp.call_tool("draw_pixels", {"path": p, "points": [[x, y]], "key": "k"})
-            for x in range(16)
-            for y in range(4)
-        ]
-        results = await asyncio.gather(*calls)
-        assert all(r.content[0].text.startswith("pixels") for r in results)
-
-    asyncio.run(go())
-    s = Sprite.load(p)
-    assert all(s.frames[0].layers[0].grid[y][x] == "k" for x in range(16) for y in range(4))
 
 
 # --------------------------------------------------------------------------- #
@@ -794,53 +747,8 @@ def test_info_per_layer_pixel_counts(tmp_path: Path):
     assert "[0] base  px: 0  keys: -" in api.info(tmp_path / "e.sprite.json")
 
 
-def test_guide_mentions_layer_plan_and_new_tools():
-    from agentsprite.server import GUIDE
-
-    assert "own layer" in GUIDE and "draw_cut" in GUIDE
-    assert 'show="full"' in GUIDE and "onion_layer" in GUIDE and "count=3" in GUIDE
 
 
-def test_mcp_new_tool_params(tmp_path: Path):
-    import asyncio
-
-    from agentsprite import server
-
-    p = str(tmp_path / "m2.sprite.json")
-
-    async def go():
-        tools = {t.name: t for t in (await server.mcp.list_tools())}
-        assert "draw_cut" in tools
-        for name in ("draw_set", "draw_paste", "draw_pixels", "draw_rect", "draw_replace", "draw_clear", "draw_copy",
-                     "transform_shift", "transform_flip", "draw_outline"):
-            assert "show" in tools[name].input_schema["properties"], name
-        for name in ("draw_clear", "draw_copy", "transform_shift", "draw_cut"):
-            assert "keys" in tools[name].input_schema["properties"], name
-        assert "region" in tools["draw_replace"].input_schema["properties"]
-        assert "count" in tools["frame_add"].input_schema["properties"]
-        assert "onion_layer" in tools["sprite_show"].input_schema["properties"]
-        await server.mcp.call_tool("sprite_new", {"path": p, "width": 8, "height": 8})
-        await server.mcp.call_tool("palette_set", {"path": p, "colors": {"k": "#000", "o": "#8b5a2b"}})
-        r = await server.mcp.call_tool("draw_rect", {"path": p, "x0": 1, "y0": 1, "x1": 2, "y1": 2, "key": "k", "fill": True})
-        assert r.content[0].text.splitlines()[1].startswith("changed: x=1..2 y=1..2 (4 pixels)")
-        r = await server.mcp.call_tool("draw_pixels", {"path": p, "points": [[7, 7]], "key": "o", "show": "none"})
-        assert r.content[0].text == "pixels 'o': 1 pixels affected in frame 0"
-        r = await server.mcp.call_tool("frame_add", {"path": p, "copy_from": "0", "count": 2})
-        assert "added 2 frames" in r.content[0].text
-        r = await server.mcp.call_tool("transform_shift", {"path": p, "dx": 0, "dy": 1, "frame": "0,2", "keys": "k"})
-        assert "in frames 0,2" in r.content[0].text
-        r = await server.mcp.call_tool("layer_add", {"path": p, "name": "prop"})
-        r = await server.mcp.call_tool("draw_cut", {"path": p, "to_layer": "prop", "keys": "o", "frame": "all"})
-        assert r.content[0].text.startswith("cut keys(o)")
-        s = Sprite.load(p)
-        assert all(f.layer("prop").grid[7][7] == "o" and f.layer("base").grid[7][7] == "." for f in s.frames)
-        assert s.frames[0].layer("base").grid[2][1] == "k" and s.frames[1].layer("base").grid[1][1] == "k"
-        r = await server.mcp.call_tool("draw_replace", {"path": p, "old": "k", "new": "o", "region": [1, 2, 1, 2], "frame": "0"})
-        assert "region(1,2,1,2): 1 pixels" in r.content[0].text
-        r = await server.mcp.call_tool("sprite_show", {"path": p, "frame": "1", "layer": "base", "onion": "prev", "onion_layer": "composite"})
-        assert "(composite)" in r.content[0].text
-
-    asyncio.run(go())
 
 
 # --------------------------------------------------------------------------- #
@@ -1071,7 +979,7 @@ def test_import_metadata_frame_size_override_note(tmp_path: Path):
 
 
 def test_resize_anchor_validation_and_show(tmp_path: Path):
-    from agentsprite.model import ANCHORS, anchor_offset, normalize_anchor
+    from pixaas.model import ANCHORS, anchor_offset, normalize_anchor
 
     assert normalize_anchor("Bottom_Right") == "bottom-right"
     assert normalize_anchor("middle") == "center"
@@ -1191,67 +1099,8 @@ def test_onion_counts_both_directions(tmp_path: Path):
     assert "0 .''''." in text
 
 
-def test_cli_session3_surface(tmp_path: Path):
-    from typer.testing import CliRunner
-
-    from agentsprite.cli import app
-
-    runner = CliRunner()
-    p = str(tmp_path / "c.sprite.json")
-    assert runner.invoke(app, ["new", p, "-w", "8", "-h", "8"]).exit_code == 0
-    assert runner.invoke(app, ["palette", "set", p, "k=#000", "r=#f00", "g=#0f0", "G=#0a0"]).exit_code == 0
-    assert runner.invoke(app, ["draw", "rect", p, "1", "1", "6", "6", "k"]).exit_code == 0
-    assert runner.invoke(app, ["draw", "rect", p, "2", "2", "5", "5", "g", "--fill"]).exit_code == 0
-    r = runner.invoke(app, ["transform", "stretch", p, "-r", "1,1,6,6", "--dy", "-2"])
-    assert r.exit_code == 0 and r.output.startswith("stretch (+0,-2)")
-    assert Sprite.load(p).frames[0].layers[0].rows()[3] == ".kkkkkk."
-    r = runner.invoke(app, ["draw", "replace", p, "gG", "Gg"])
-    assert r.exit_code == 0 and "'g'->'G','G'->'g'" in r.output
-    assert runner.invoke(app, ["frame", "add", p, "--copy", "0"]).exit_code == 0
-    r = runner.invoke(app, ["transform", "shift", p, "0", "1", "-f", "1", "-r", "0,3,7,3", "--overwrite"])
-    assert r.exit_code == 0 and "overwrite" in r.output
-    r = runner.invoke(app, ["diff", p, "0", "1", "--limit", "3"])
-    assert r.exit_code == 0 and r.output.count("->") == 3 and "more (limit=-1" in r.output
-    r = runner.invoke(app, ["resize", p, "10", "10", "--anchor", "botom"])
-    assert r.exit_code == 1 and "unknown anchor" in r.output
-    r = runner.invoke(app, ["resize", p, "10", "10", "--anchor", "center", "--show", "none"])
-    assert r.exit_code == 0 and r.output.strip() == "resized 8x8 -> 10x10 (anchor center; content moved by (+1,+1))"
-    assert runner.invoke(app, ["export", "sheet", p, str(tmp_path / "s.png")]).exit_code == 0
-    r = runner.invoke(app, ["import", str(tmp_path / "s.png"), str(tmp_path / "i.sprite.json"), "-m", str(tmp_path / "s.json")])
-    assert r.exit_code == 0 and "metadata:" in r.output
-    assert len(Sprite.load(tmp_path / "i.sprite.json").frames) == 2
 
 
-def test_mcp_session3_tools(tmp_path: Path):
-    import asyncio
-
-    from agentsprite import server
-
-    p = str(tmp_path / "m3.sprite.json")
-
-    async def go():
-        tools = {t.name: t for t in (await server.mcp.list_tools())}
-        assert "transform_stretch" in tools
-        assert "overwrite" in tools["transform_shift"].input_schema["properties"]
-        assert "mapping" in tools["draw_replace"].input_schema["properties"]
-        assert "limit" in tools["sprite_diff"].input_schema["properties"]
-        assert "show" in tools["sprite_resize"].input_schema["properties"]
-        assert "metadata" in tools["import_png"].input_schema["properties"]
-        await server.mcp.call_tool("sprite_new", {"path": p, "width": 8, "height": 8})
-        await server.mcp.call_tool("palette_set", {"path": p, "colors": {"k": "#000", "g": "#0f0", "r": "#f00"}})
-        await server.mcp.call_tool("draw_rect", {"path": p, "x0": 1, "y0": 1, "x1": 6, "y1": 6, "key": "k"})
-        await server.mcp.call_tool("draw_rect", {"path": p, "x0": 2, "y0": 2, "x1": 5, "y1": 5, "key": "g", "fill": True})
-        r = await server.mcp.call_tool("transform_stretch", {"path": p, "region": [1, 1, 6, 6], "dy": -2})
-        assert r.content[0].text.startswith("stretch (+0,-2) region(1,1,6,6) anchor bottom")
-        r = await server.mcp.call_tool("draw_replace", {"path": p, "mapping": {"g": "r", "k": "g"}})
-        assert "'g'->'r','k'->'g'" in r.content[0].text
-        assert Sprite.load(p).frames[0].layers[0].rows()[3] == ".gggggg."
-        r = await server.mcp.call_tool("sprite_resize", {"path": p, "width": 4, "height": 4, "anchor": "botom"})
-        assert r.content[0].text.startswith("error: unknown anchor 'botom'")
-        r = await server.mcp.call_tool("sprite_resize", {"path": p, "width": 10, "height": 10, "anchor": "center", "show": "none"})
-        assert r.content[0].text == "resized 8x8 -> 10x10 (anchor center; content moved by (+1,+1))"
-
-    asyncio.run(go())
 
 
 # --------------------------------------------------------------------------- #

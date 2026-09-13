@@ -167,7 +167,7 @@ def build_sheet(
     meta = {
         "frames": frames_meta,
         "meta": {
-            "app": "agentsprite",
+            "app": "pixaas",
             "version": "0.1",
             "name": sprite.name,
             "format": "RGBA8888",
@@ -220,8 +220,9 @@ def export_gif(
 ) -> Path:
     """Animated GIF of all frames or a tag. Transparent by default."""
     indices = sprite.tag(tag).frame_indices() if tag else list(range(len(sprite.frames)))
-    if tag and not sprite.tag(tag).loop:
-        loop = 1
+    # GIF's loop count is the number of repeats after the first play.
+    # Omit the extension for a one-shot tag (loop=1 would play twice).
+    loop_options = {} if tag and not sprite.tag(tag).loop else {"loop": loop}
     imgs, durations = [], []
     for i in indices:
         f = sprite.frames[i]
@@ -239,7 +240,7 @@ def export_gif(
         save_all=True,
         append_images=rest,
         duration=durations,
-        loop=loop,
+        **loop_options,
         disposal=2,
         transparency=first.info.get("transparency", 0),
         optimize=False,

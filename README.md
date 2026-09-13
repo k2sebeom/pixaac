@@ -1,247 +1,325 @@
-# agentsprite
+# PixaaS
 
-A pixel-art sprite and sprite-sheet editor built for **AI agents**, not humans.
-Think Aseprite, minus the GUI: everything is a CLI command or an MCP tool, and
-pixels are expressed as text grids that a language model can read and write
-directly.
+**Pixel Art as a Code.**
 
-```text
-  0123456789
-0 ....kkkk..
-1 ..kkggggkk
-2 .kggwggwgk
-3 .kggeggegk
-4 .kggggggkk
+Define pixel art in Python. Compose reusable parts, generate variants, animate
+layers, and render assets for your game or app.
+
+The script is the source of truth. A sprite is the result of running it.
+Change a palette, adjust a shape, or fix a drawing function, then rebuild every
+asset that uses it.
+
+```python
+from pixaas import Sprite
+
+robot = Sprite(32, 32, name="bolt", palette={
+    "k": "#172332",  # outline
+    "o": "#e8833e",  # armor
+    "y": "#ffcb75",  # highlight
+    "s": "#435c6a",  # steel
+    "w": "#e5ece0",  # light steel
+    "t": "#164653",  # glass
+    "c": "#43c8c4",  # eyes
+})
+
+body = robot.layer("body")
+body.rect((10, 16, 21, 23), "o")
+body.line((11, 16), (20, 16), "y")
+body.rect((13, 18, 18, 20), "w")
+body.rect((8, 17, 9, 23), "s")
+body.rect((22, 17, 23, 23), "s")
+for x in (11, 18):
+    body.rect((x, 24, x + 2, 27), "s")
+    body.rect((x - 1, 28, x + 3, 29), "w")
+body.outline("k")
+
+head = robot.layer("head")
+head.rect((9, 5, 22, 12), "o")
+head.line((10, 5), (21, 5), "y")
+head.rect((10, 7, 21, 11), "t")
+for x in (12, 18):
+    head.rect((x, 8, x + 1, 9), "c")
+head.pixel(16, 10, "c")
+head.outline("k")
+
+robot.export_png("out/bolt.png")                 # native 32×32, transparent
+robot.export_png("out/bolt-preview.png", scale=8) # crisp 256×256 preview
 ```
 
-Every character is a **palette key** (`k` = outline, `g` = body, ...). `.` is
-always transparent.
+Drawing happens in memory. Files are written only when you explicitly save or
+export. Run a script with ordinary Python:
+
+```bash
+python draw_robot.py
+```
 
 ## Install
 
+Python 3.12 or newer. From a checkout:
+
+```bash
+python -m pip install .
+```
+
+For development:
+
 ```bash
 uv sync
-uv run agentsprite --help
-```
-
-## Concepts
-
-| Term    | Meaning                                                               |
-| ------- | --------------------------------------------------------------------- |
-| sprite  | One `*.sprite.json` file: palette + frames + tags + notes             |
-| palette | Map of single-character key -> `#RRGGBB` / `#RRGGBBAA` (or transparent) |
-| frame   | One animation frame with a duration in ms                            |
-| layer   | A key grid; every frame has the same layer stack (bottom -> top)      |
-| tag     | Named frame range (`walk: 0..3`, forward / reverse / pingpong)        |
-
-Coordinates are 0-based, x to the right, y down. All ranges are inclusive.
-Frames are referenced by index, name, or `all`. Layers by index or name.
-
-## CLI walkthrough
-
-```bash
-agentsprite new slime.sprite.json -w 12 -h 10
-agentsprite palette set slime.sprite.json k=#1a1a2e g=#4ade80 d=#16a34a w=#fff e=#000
-
-# rows separated by '/' (or newlines, or pipe a file via stdin)
-agentsprite draw set slime.sprite.json \
-  "..../..../....gggg..../..gggggggg../.gggggggggg./.ggwggggwgg./.ggeggggegg./.gggggggggg./.dgggggggggd/.dddddddddd."
-agentsprite draw outline slime.sprite.json k
-
-agentsprite frame add slime.sprite.json --copy 0 -d 150 -n 3   # 3 duplicates of frame 0
-agentsprite transform stretch slime.sprite.json -r 1,2,10,9 --dy -2 -f 1   # squash the body onto its feet
-agentsprite transform stretch slime.sprite.json -r 1,2,10,9 --dy 2 -f 3    # stretch it
-agentsprite draw replace slime.sprite.json gd wr -f 2                       # recolor two keys at once (hurt flash)
-agentsprite tag set slime.sprite.json idle 0 3 --direction pingpong
-
-agentsprite show slime.sprite.json -f 1        # text grid with rulers + legend
-agentsprite show slime.sprite.json -f 1 --onion prev   # ghost frame 0 underneath (')
-agentsprite diff slime.sprite.json 0 1         # what changed between frames (grid; --limit N lists pixels)
-
-agentsprite export sheet slime.sprite.json out/slime.png -c 2 --padding 1 -s 4
-agentsprite export gif   slime.sprite.json out/slime.gif -s 8
-agentsprite export png   slime.sprite.json out/slime.png -f 0 -s 8 --bg '#222233'
-agentsprite export apng  slime.sprite.json out/slime.png -s 8   # lossless RGBA animation
-agentsprite import out/slime.png back.sprite.json               # reads out/slime.json: names, durations, tags, palette
-
-# palettes: built-in presets, or reuse another sprite's palette
-agentsprite palette presets                               # pico-8, sweetie-16, endesga-32, gameboy, 1bit
-agentsprite palette preset slime.sprite.json pico-8       # keys 0-f
-agentsprite new hero.sprite.json --palette-from slime.sprite.json
-agentsprite import hero.png hero.sprite.json --palette-from slime.sprite.json
-```
-
-Every mutating command prints what changed so an agent can verify the edit
-without a second call: by default only the box around the changed pixels
-(with absolute rulers), `--show full` for the whole frame, `--show none` for
-a one-line result. Counts are *changed* pixels: rewriting a layer with an
-identical grid, or rotating a symmetric shape, reports `0 pixels affected`
-and `(no pixels changed)`.
-
-```text
-filled rect 'k': 12 pixels affected in frame 0
-changed: x=12..15 y=3..5 (12 pixels) in frame [0] frame0; show="full" for the whole 32x32 frame
-  1
-  2345
-3 kkkk
-4 kkkk
-5 kkkk
-```
-
-When only some cells inside the box changed, a second grid beside it shows
-just those cells, so setting a few `g` pixels inside a `g` area is still
-visible:
-
-```text
-pixels 'k': 2 pixels affected in frame 0
-changed: x=1..4 y=1..4 (2 pixels) in frame [0] frame0; show="full" ...; right grid = changed cells only
-  1234   1234
-1 kggg   k
-2 gggg
-3 gggg
-4 gggk      k
-```
-
-Command groups: `palette` (set, rm, ls, preset, presets), `frame`, `layer`,
-`tag`, `draw` (pixel, line, rect, ellipse, fill, replace, clear, copy, cut,
-paste, set, outline), `transform` (flip, rotate, shift, stretch, mirror),
-`export` (png, frames, sheet, gif, apng), `import`, `resize`, `notes`,
-`server`, `guide`.
-
-Selecting what an edit touches:
-
-- `-f/--frame` takes an index, a name, `all`, a range `0..2` or a list `1,3`,
-  so one call applies the same bob to several frames.
-- `--region x0,y0,x1,y1` on `draw clear`, `draw copy`, `draw cut`,
-  `draw replace`, `transform flip` and `transform shift` limits the edit to a
-  box (bob the torso, keep the feet; brighten only the orb interior).
-- `--keys ow` on `draw clear`, `draw copy`, `draw cut` and `transform shift`
-  limits it to pixels with those palette keys ("everything except the staff"
-  is a rectangle problem no more).
-- `draw cut FILE staff --keys ow -f all` moves the matching pixels onto
-  another layer in one call. Put anything that moves independently (weapon,
-  staff, cape, shadow) on its own layer before drawing; if you forgot, this
-  is the fix.
-- `draw outline --outer` leaves enclosed gaps (between legs, inside rings)
-  open. Re-running `draw outline` is safe: pixels already holding the outline
-  key are not shape, so a damaged outline is completed, never doubled.
-- Grid strings (`draw set`, `draw paste`) are one row per line; an empty or
-  whitespace-only line is an all-`.` row, so two leading blank lines start
-  the drawing at y=2. Only trailing blank lines are dropped.
-- Without `--layer` an edit lands on layer 0, the *bottom* layer (after
-  `layer add cape --at 0` that is the cape). The echo names the layer
-  whenever the frame has more than one.
-- `draw clear` echoes the pixels it removed (the before state), so a wrong
-  region is visible without a second `show`. `show -f 0..3` prints several
-  frames.
-- `draw replace FILE gGl rRw` recolors several keys in one pass (the
-  characters pair up; MCP also takes `mapping={"g": "r", ...}`). Pairs apply
-  simultaneously, so `gG Gg` swaps two keys.
-
-Animation helpers:
-
-- `transform stretch -r x0,y0,x1,y1 --dy -2` squashes a region onto its
-  bottom edge (`--dy 2` stretches it; `--dx` for width; `--anchor top`,
-  `center`, ... for which edge stays put). Rows/columns are duplicated or
-  dropped nearest-neighbour and the box's edges (the outline) are always
-  kept, so a bounce is one call per frame instead of a shift plus a fix-up.
-- `transform shift` with `--region` merges the moved pixels into the landing
-  area by default (old pixels survive under transparent cells of the moved
-  box); `--overwrite` makes the box's footprint replace what it lands on.
-  Pixels pushed off the canvas are lost and the summary line says so:
-  `(N pixels dropped at the canvas edge)`.
-- Tags follow their frames through `frame add --at`, `frame mv` and
-  `frame rm`: a frame moved out of a tag's block leaves the tag, one dropped
-  into the middle of a block joins it.
-- `resize --anchor` validates its argument (`botom` is an error, not a silent
-  center) and prints the content box afterwards (`--show full|none`).
-
-`show --onion prev` ghosts the previous frame under the current one and
-counts both directions (pixels only in the ghost, pixels only in this frame
-with their bbox); with `--layer body --onion-layer composite` the ghost is the
-previous frame's full composite (staff included) while you look at one layer.
-`diff A B` prints a grid with B's key where the frames differ (`'` where B is
-transparent) plus added/removed/recolored counts; `--limit N` adds up to N
-per-pixel lines, `--limit -1` all of them. `info` lists per-layer pixel counts
-and keys per frame so you can see which layer holds what.
-
-## Sprite sheet output
-
-`export sheet` writes a PNG plus a JSON file in the shape of Aseprite's
-"array" export, so existing importers (Phaser, Godot plugins, Unity tools)
-can consume it:
-
-```json
-{
-  "frames": [
-    {"filename": "slime_0_frame0", "frame": {"x": 1, "y": 1, "w": 48, "h": 40}, "duration": 100, ...}
-  ],
-  "meta": {
-    "app": "agentsprite", "image": "slime.png", "size": {"w": 99, "h": 42},
-    "frameTags": [{"name": "idle", "from": 0, "to": 1, "direction": "pingpong"}],
-    "palette": {".": null, "k": "#1a1a2e", "g": "#4ade80"}
-  }
-}
-```
-
-## MCP server
-
-```bash
-agentsprite server                       # stdio (default)
-agentsprite server --transport streamable-http --port 8765
-```
-
-Claude Code / Claude Desktop config:
-
-```json
-{
-  "mcpServers": {
-    "agentsprite": {
-      "command": "uv",
-      "args": ["run", "--project", "/path/to/agentsprite", "agentsprite", "server"]
-    }
-  }
-}
-```
-
-The server exposes the same operations as tools (`sprite_new`, `palette_set`,
-`palette_preset`, `draw_set`, `draw_paste`, `draw_line`, `draw_cut`,
-`frame_add`, `tag_set`, `export_sheet`, `export_gif`, `export_apng`, ...).
-Results are plain text (the changed box after every edit, or the whole grid
-with `show="full"`), never JSON-wrapped, so newlines survive in the client.
-Two extras are only meaningful over MCP:
-
-- `preview(path, frame, scale)` and `preview_sheet(path)` return a rendered
-  PNG so vision-capable agents can look at the actual pixels.
-- `guide()` (also the `agentsprite://guide` resource) explains the workflow
-  and a few pixel-art tips.
-
-## File format
-
-```json
-{
-  "format": "agentsprite", "version": 1,
-  "name": "slime", "width": 12, "height": 10, "notes": "",
-  "palette": {".": null, "k": "#1a1a2e", "g": "#4ade80"},
-  "frames": [
-    {"name": "frame0", "duration_ms": 100,
-     "layers": [{"name": "base", "pixels": ["............", "....kkkk....", "..."]}]}
-  ],
-  "tags": [{"name": "idle", "from": 0, "to": 1, "direction": "pingpong", "loop": true}]
-}
-```
-
-It is plain JSON with rows as strings, so it diffs well in git and can be
-edited by hand or by an agent without the tool.
-
-`import` turns a PNG back into this format. When the sheet's JSON sits next to
-the image (or `--metadata FILE` points at it) the frame rectangles, names,
-durations, tags and palette are restored, so `export sheet` -> `import` is a
-lossless round trip; otherwise `--frame-width/--frame-height` slice the image
-and the frames are named `frame0, frame1, ...`.
-
-## Development
-
-```bash
+uv run python examples/robot.py
 uv run pytest
 ```
+
+Pillow is the only runtime dependency. PixaaS runs locally and works in scripts,
+notebooks, build jobs, and agent coding environments.
+
+## The programming model
+
+| Object | Purpose |
+| --- | --- |
+| `Sprite` | Canvas dimensions, palette, frames, and animation tags |
+| `Frame` | A named pose with a duration in milliseconds |
+| `Layer` | A drawing surface within a frame |
+| `Palette` | Single-character keys mapped to RGB or RGBA colors |
+| Python function | A reusable part, drawing rule, or complete asset |
+
+A sprite starts with one frame, `frame0`, and a transparent `base` layer.
+`sprite.layer("head")` gets or creates a named layer in frame zero. New layers
+are added above existing layers and added to every frame. Drawing into a layer
+changes only that frame. `sprite.frame("blink").layer("head")` addresses another
+pose explicitly.
+
+There is no global canvas or implicit current frame. Functions receive the
+surface they draw on, so independent sprites can be built in the same process.
+
+## Draw shapes and place pixels
+
+Use geometry for silhouettes and palette-key grids for small, deliberate details.
+Both write to the same pixel surface.
+
+```python
+details = robot.layer("details")
+details.polygon([(25, 15), (27, 13), (29, 15), (27, 17)], "s")
+details.line((27, 17), (27, 24), "w")
+details.stamp(
+    "kkk\n"
+    "kwk\n"
+    "kkk",
+    x=14, y=21,
+)
+```
+
+| Operation | Example |
+| --- | --- |
+| One pixel | `layer.pixel(4, 7, "c")` |
+| Several pixels | `layer.pixels([(4, 7), (9, 7)], "c")` |
+| Line | `layer.line((2, 3), (8, 3), "y")` |
+| Rectangle | `layer.rect((2, 3, 8, 7), "o")` |
+| Ellipse | `layer.ellipse((2, 3, 8, 7), "o", fill=False)` |
+| Polygon | `layer.polygon([(2, 7), (5, 2), (8, 7)], "o")` |
+| Flood fill | `layer.fill(5, 5, "o")` |
+| Stamp | `layer.stamp("kk\nko", x=4, y=6)` |
+| Replace a layer | `layer.set_grid("..kk..\n.kook.\n..kk..")` |
+| Outline | `layer.outline("k", outer_only=True)` |
+| Recolor pixels | `layer.replace({"o": "s", "y": "w"})` |
+| Erase a region | `layer.clear(region=(2, 3, 8, 7))` |
+
+Drawing and transform methods mutate the selected layer and return an
+affected-pixel count. Primitive writes count pixels written, including repeated
+writes of the same key. Methods do not print or save automatically.
+
+### Pixel rules
+
+- Coordinates are integers, with `(0, 0)` at the top left. X increases rightward;
+  Y increases downward. Box corners and line endpoints are inclusive.
+- Rectangles, ellipses, and polygons are filled by default. Use `fill=False`
+  for a one-pixel perimeter.
+- Every palette key is one non-whitespace character. `.` is always transparent.
+  Colors accept `#RGB`, `#RGBA`, `#RRGGBB`, and `#RRGGBBAA`.
+- Drawing is at native resolution, with no antialiasing. Integer export scales
+  use nearest-neighbor sampling. A 32×32 sprite stays 32×32 unless resized.
+- Shapes and stamps are clipped at the canvas edge. Individual `pixel` calls
+  and flood-fill seeds must be inside it. Leave room around silhouettes when
+  adding an outline.
+- Stamp rows are separated by newlines; spaces inside rows are ignored.
+  Short rows are padded with transparency. Leading blank lines consume rows.
+  `.` skips existing pixels unless `overwrite=True`.
+- `set_grid` replaces the entire layer and rejects a grid larger than the canvas.
+  Unknown palette keys raise `SpriteError`.
+- Outlining with the same key is safe to repeat: it completes the contour
+  without growing another ring.
+
+## Reuse parts with Python functions
+
+A component is an ordinary function. Give it a layer, an origin, and parameters.
+Use loops for repeated details and conditionals for visual variants.
+
+```python
+from pixaas import Layer
+
+def rivet(layer: Layer, x: int, y: int):
+    layer.stamp("kk\nkw", x=x, y=y)
+
+def vent(layer: Layer, x: int, y: int, slots: int = 3):
+    for offset in range(slots):
+        layer.line((x + offset * 2, y), (x + offset * 2, y + 1), "k")
+
+for x in (11, 19):
+    rivet(details, x, 17)
+vent(details, 13, 22)
+```
+
+Keep the head, body, held tool, and effects on separate layers when they need to
+move independently. Put shared palettes and drawing functions in regular Python
+modules. Rebuilding an asset set is a loop over those functions.
+
+The [mechanic robot example](examples/robot.py) demonstrates a complete asset
+factory with a reusable palette, separate parts, and an idle animation.
+
+## Generate variants
+
+Changing a palette entry changes every pixel using that key across all frames.
+Copies have independent palettes, pixels, and animation metadata.
+
+```python
+ice_robot = robot.copy(name="bolt-ice")
+ice_robot.palette.set("o", "#468fb5")
+ice_robot.palette.set("y", "#9de1ed")
+ice_robot.export_png("out/bolt-ice.png")
+```
+
+Use `layer.replace(...)` to change which keys selected pixels use. Use
+`sprite.palette.set(...)` to change what those keys look like.
+
+Built-in palettes are available as dictionaries:
+
+```python
+from pixaas import presets
+
+icon = Sprite(16, 16, palette=presets.get("sweetie-16").as_dict())
+```
+
+Presets include `pico-8`, `sweetie-16`, `endesga-32`, `gameboy`, and `1bit`.
+
+## Animate named frames
+
+Duplicate a pose, change the relevant layers, then name the playback range.
+New frames are blank unless `copy_from` is supplied.
+
+```python
+robot.frame(0).duration_ms = 180
+
+up = robot.add_frame("up", copy_from=0, duration_ms=120)
+up.layer("head").shift(0, -1)
+
+blink = robot.add_frame("blink", copy_from=0, duration_ms=100)
+face = blink.layer("head")
+face.replace({"c": "t"})
+for x in (12, 18):
+    face.line((x, 9), (x + 1, 9), "c")
+
+robot.tag("idle", 0, 2, direction="pingpong")
+robot.export_apng("out/bolt-idle.png", tag="idle", scale=8)
+robot.export_sheet("out/bolt-sheet.png", columns=3, padding=1)
+```
+
+Tags use inclusive frame indices and support `forward`, `reverse`, and
+`pingpong` playback. Durations are positive integer milliseconds.
+`loop=False` marks a tag for one-shot playback.
+
+Transforms operate on a layer in one frame:
+
+```python
+pose = robot.copy(name="bolt-squash")
+pose.layer("body").stretch(region=(8, 15, 23, 30), dy=-2, anchor="bottom")
+pose.export_png("out/bolt-squash.png")
+```
+
+`shift` supports selected keys, a region, wrapping, and transparent overwrite.
+Pixels shifted past the canvas edge are discarded unless `wrap=True`.
+`flip` supports horizontal or vertical axes, `rotate` makes quarter turns on a
+square canvas, and `mirror` copies one half to the other. `stretch` uses
+nearest-neighbor sampling and preserves the region's border pixels.
+
+## Render and export
+
+| Output | Method | Use |
+| --- | --- | --- |
+| Pillow RGBA image | `sprite.render()` | Notebook display, image processing, custom pipelines |
+| Transparent PNG | `sprite.export_png(path)` | A single frame at native size |
+| Enlarged PNG | `sprite.export_png(path, scale=8)` | Pixel-sharp review preview |
+| Individual frames | `sprite.export_frames(directory)` | One PNG per frame |
+| Sprite sheet + JSON | `sprite.export_sheet(path, columns=4)` | Aseprite-compatible array metadata |
+| Animated PNG | `sprite.export_apng(path, tag="idle")` | Animation with full RGBA colors |
+| Animated GIF | `sprite.export_gif(path, tag="idle")` | Widely supported animation preview |
+| Editable snapshot | `sprite.save(path)` | Palette, layers, frames, and tags as JSON |
+
+Exports create parent directories and replace existing outputs. PNGs and APNGs
+preserve transparency. Supply `background="#243342"` to flatten a preview onto
+a solid color. GIF has palette and transparency limits; use APNG for full RGBA.
+Sheets contain the source frames once, with playback directions in their tag
+metadata.
+
+```python
+image = robot.render(frame="up", scale=8, background="#243342")
+assert image.size == (256, 256)
+
+robot.save("out/bolt.sprite.json")
+restored = Sprite.load("out/bolt.sprite.json")
+```
+
+`Sprite.from_png("out/bolt-sheet.png")` restores frame rectangles, names,
+durations, tags, and palette when the adjacent sheet JSON is present. A flattened
+image cannot recover separate drawing layers. Without metadata, supply
+`frame_width` and `frame_height` to slice a sheet, or import a single PNG.
+
+## Inspect and verify
+
+Inspect the pixels directly or work with the rendered image:
+
+```python
+print(robot.inspect(frame=0, layer="head"))
+print(head.bounds())
+assert robot.validate() == []
+assert robot.render().getpixel((0, 0))[3] == 0
+```
+
+`layer.rows()` returns palette-key strings; `layer.histogram()` counts their
+usage. `sprite.validate()` returns structural problems, or an empty list for a
+consistent document.
+
+For procedural art, own randomness explicitly with a seeded Python
+`random.Random`. Identical drawing inputs produce identical pixels. Pin your
+Python and dependency versions when reproducible encoded files also matter.
+
+## Project layout
+
+Keep source art next to the code that uses it:
+
+```text
+art/
+  palettes.py       # shared colors
+  parts.py          # eyes, joints, armor, foliage
+  characters.py     # asset factories
+  build.py          # variants, animations, exports
+out/
+  characters.png
+  characters.json
+```
+
+An asset build is a Python program. It can accept arguments, read configuration,
+run under a build system, and return a failing exit code if validation fails.
+Generated PNGs and sprite snapshots are outputs; editing the Python source and
+running it again is the primary workflow.
+
+## Design principles
+
+1. **Python is the authoring language.** Functions, loops, modules, and data
+   structures express the artwork.
+2. **Pixel decisions stay explicit.** Palette keys, integer coordinates,
+   native-resolution drawing, and predictable clipping define the result.
+3. **Composition scales the work.** Reusable parts and independent layers make
+   families of assets practical.
+4. **Iteration stays local.** Build in memory, render on demand, and inspect
+   both the image and the pixels.
+5. **Outputs belong in real projects.** Standard images and sprite-sheet
+   metadata connect the art to games, apps, documentation, and build pipelines.
