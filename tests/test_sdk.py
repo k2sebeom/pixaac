@@ -163,3 +163,42 @@ def test_robot_example(tmp_path):
     assert len(sprite.frames) == 3
     assert sprite.validate() == []
     assert sprite.render(frame=0).tobytes() != sprite.render(frame="blink").tobytes()
+
+
+def test_layer_management_across_frames_and_handle_lifetime():
+    sprite = Sprite(4, 4, palette={"r": "#f00", "b": "#00f"})
+    body = sprite.layer("body")
+    body.pixel(1, 1, "r")
+    tool = sprite.layer("tool")
+    tool.pixel(1, 1, "b")
+    pose = sprite.add_frame("pose", copy_from=0)
+    pose_tool = pose.get_layer("tool")
+    assert sprite.render().getpixel((1, 1)) == (0, 0, 255, 255)
+    sprite.move_layer("tool", 1)
+    assert sprite.layer_names() == ("base", "tool", "body")
+    for i, frame in enumerate(sprite.frames):
+        assert tuple(layer.name for layer in frame.layers) == sprite.layer_names()
+        assert sprite.render(frame=i).getpixel((1, 1)) == (255, 0, 0, 255)
+    sprite.rename_layer("tool", "bag")
+    assert tool.name == pose_tool.name == "bag"
+    tool.pixel(0, 0, "b")
+    assert pose_tool.rows()[0][0] == "."
+    with pytest.raises(SpriteError, match="already exists"):
+        sprite.rename_layer("bag", "body")
+    with pytest.raises(SpriteError, match="nonempty"):
+        sprite.rename_layer("bag", "")
+    with pytest.raises(SpriteError, match="no layer named.*have"):
+        pose.get_layer("bagg")
+    assert "bagg" not in sprite.layer_names()
+    sprite.remove_layer("bag")
+    sprite.layer("bag")  # Reusing a name must never revive a removed handle.
+    for handle in (tool, pose_tool):
+        with pytest.raises(SpriteError, match="was removed"):
+            handle.pixel(0, 0, "r")
+    assert sprite.validate() == []
+    sprite.remove_layer("base")
+    sprite.remove_layer("bag")
+    with pytest.raises(SpriteError, match="at least one"):
+        sprite.remove_layer("body")
+    assert sprite.layer_names() == ("body",)
+    assert sprite.validate() == []

@@ -77,6 +77,31 @@ pose explicitly.
 There is no global canvas or implicit current frame. Functions receive the
 surface they draw on, so independent sprites can be built in the same process.
 
+## Manage the layer stack
+
+`robot.layer_names()` lists names from bottom to top. `frame.layers` returns
+live layer handles in that same order. `layer(name)` gets or creates a layer;
+`get_layer(name)` on a sprite or frame is strict and raises `SpriteError` with
+available names when a layer is missing.
+
+```python
+print(robot.layer_names())
+accessory = robot.get_layer("tool")
+robot.move_layer("tool", to=robot.layer_names().index("body"))
+robot.rename_layer("tool", "wrench")
+assert accessory.name == "wrench"
+# The wrench now sits behind the body in every frame.
+```
+
+Moving, renaming, and removing layers affect **every frame**, including blank
+frames; drawings and visibility edits affect only the addressed frame.
+`move_layer(name, to)` uses a zero-based final position (zero is bottom), clamped
+to the stack bounds. `rename_layer(name, new_name)` rejects duplicate and empty
+names. Existing handles follow renames, reorders, and canvas resizes.
+`remove_layer(name)` removes its pixels from every frame and requires at least
+one layer to remain. All uses of a removed handle raise `SpriteError`, even if a
+new layer later reuses its name. Copies of a sprite remain independent.
+
 ## Draw shapes and place pixels
 
 Use geometry for silhouettes and palette-key grids for small, deliberate details.

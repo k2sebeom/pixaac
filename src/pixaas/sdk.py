@@ -18,11 +18,18 @@ class Layer:
     """A live drawing surface in one frame, backed by palette keys."""
 
     def __init__(self, sprite: Sprite, frame: model.Frame, name: str):
-        self._sprite, self._frame, self.name = sprite, frame, name
+        self._sprite, self._frame = sprite, frame
+        self._layer = frame.layer(name)
 
     @property
     def _data(self) -> model.Layer:
-        return self._frame.layer(self.name)
+        if not any(layer is self._layer for layer in self._frame.layers):
+            raise SpriteError(f"layer {self._layer.name!r} was removed; get a new layer handle")
+        return self._layer
+
+    @property
+    def name(self) -> str:
+        return self._data.name
 
     @property
     def _palette(self) -> Palette:
@@ -137,6 +144,15 @@ class Frame:
             raise SpriteError("duration_ms must be a positive integer")
         self._data.duration_ms = value
 
+    @property
+    def layers(self) -> tuple[Layer, ...]:
+        """Live handles in bottom-to-top stacking order."""
+        return tuple(Layer(self._sprite, self._data, layer.name) for layer in self._data.layers)
+
+    def get_layer(self, name: str) -> Layer:
+        """Look up an existing layer; raise SpriteError on a missing name."""
+        return Layer(self._sprite, self._data, name)
+
     def layer(self, name: str) -> Layer:
         """Get a layer, adding a transparent layer to every frame if new."""
         if name not in self._sprite._data.layer_names():
@@ -189,6 +205,33 @@ class Sprite:
 
     def layer(self, name: str = "base", *, frame: int | str = 0) -> Layer:
         return self.frame(frame).layer(name)
+
+    def get_layer(self, name: str, *, frame: int | str = 0) -> Layer:
+        """Strict lookup; unlike layer(), never creates a layer."""
+        return self.frame(frame).get_layer(name)
+
+    def layer_names(self) -> tuple[str, ...]:
+        """The shared stack, ordered bottom to top."""
+        return tuple(self._data.layer_names())
+
+    def move_layer(self, name: str, to: int) -> None:
+        """Move a layer in every frame; zero is bottom, oversized indices clamp."""
+        if not isinstance(to, int):
+            raise SpriteError("layer position must be an integer")
+        self._data.move_layer(name, to)
+
+    def rename_layer(self, name: str, new_name: str) -> None:
+        """Rename in every frame; existing handles follow the rename."""
+        self.get_layer(name)
+        if not isinstance(new_name, str) or not new_name.strip():
+            raise SpriteError("layer name must be a nonempty string")
+        if new_name != name and new_name in self.layer_names():
+            raise SpriteError(f"layer {new_name!r} already exists")
+        self._data.rename_layer(name, new_name)
+
+    def remove_layer(self, name: str) -> None:
+        """Remove from every frame, invalidating handles; keep at least one layer."""
+        self._data.remove_layer(name)
 
     def add_frame(
         self, name: str | None = None, *,

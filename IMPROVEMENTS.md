@@ -61,13 +61,13 @@ image. A script error is visible, and correcting it resumes updates.
 The underlying model supports several layer-management operations that the
 public `Sprite`/`Frame`/`Layer` API does not expose.
 
-- [ ] Add a public way to list layers in stacking order.
-- [ ] Expose layer reordering, renaming, and removal.
-- [ ] Define and document how those operations affect every frame.
-- [ ] Define how existing `Layer` handles behave after a rename or removal.
-- [ ] Offer strict layer lookup alongside get-or-create behavior, so a typo
+- [x] Add a public way to list layers in stacking order.
+- [x] Expose layer reordering, renaming, and removal.
+- [x] Define and document how those operations affect every frame.
+- [x] Define how existing `Layer` handles behave after a rename or removal.
+- [x] Offer strict layer lookup alongside get-or-create behavior, so a typo
   during editing can raise an actionable error.
-- [ ] Add a README example that moves a foreground accessory behind a character.
+- [x] Add a README example that moves a foreground accessory behind a character.
 
 **Acceptance criteria:** A script can inspect and change stacking order without
 accessing private data or saving and reloading a snapshot. Structural operations
