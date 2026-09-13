@@ -145,6 +145,7 @@ def test_invalid_duration_does_not_append_frame(duration):
 def test_readme_python_examples(tmp_path, monkeypatch):
     """The product contract's Python examples execute together, top to bottom."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(ROOT))
     blocks = re.findall(r"```python\n(.*?)```", (ROOT / "README.md").read_text(), re.S)
     namespace = {}
     for index, code in enumerate(blocks):

@@ -9,49 +9,35 @@ The script is the source of truth. A sprite is the result of running it.
 Change a palette, adjust a shape, or fix a drawing function, then rebuild every
 asset that uses it.
 
+| Sprite | Idle animation | Ice palette | Rose palette |
+| --- | --- | --- | --- |
+| ![BOLT robot](docs/images/bolt-preview.png) | ![BOLT bouncing and blinking](docs/images/bolt-idle.gif) | ![Ice BOLT](docs/images/bolt-ice.png) | ![Rose BOLT](docs/images/bolt-rose.png) |
+
+From a checkout, install with `python -m pip install .`, then run
+`python examples/robot.py`. Open `out/bolt-preview.png` or `out/bolt-idle.gif`
+to see your first output. The images above come from that checked-in script;
+regenerate the documentation images with `python examples/robot.py docs/images`.
+
+Try this from the checkout root (save as `draw_robot.py`, then run
+`python draw_robot.py`):
+
 ```python
-from pixaas import Sprite
+from examples.robot import build_robot
 
-robot = Sprite(32, 32, name="bolt", palette={
-    "k": "#172332",  # outline
-    "o": "#e8833e",  # armor
-    "y": "#ffcb75",  # highlight
-    "s": "#435c6a",  # steel
-    "w": "#e5ece0",  # light steel
-    "t": "#164653",  # glass
-    "c": "#43c8c4",  # eyes
-})
+robot = build_robot()
+robot.export_png("out/bolt.png")
+robot.export_png("out/bolt-preview.png", scale=8)
 
-body = robot.layer("body")
-body.rect((10, 16, 21, 23), "o")
-body.line((11, 16), (20, 16), "y")
-body.rect((13, 18, 18, 20), "w")
-body.rect((8, 17, 9, 23), "s")
-body.rect((22, 17, 23, 23), "s")
-for x in (11, 18):
-    body.rect((x, 24, x + 2, 27), "s")
-    body.rect((x - 1, 28, x + 3, 29), "w")
-body.outline("k")
-
+ice = robot.copy(name="bolt-ice")
+ice.palette.set("o", "#468fb5")
+ice.palette.set("y", "#9de1ed")
+ice.export_png("out/bolt-ice.png", scale=8)
 head = robot.layer("head")
-head.rect((9, 5, 22, 12), "o")
-head.line((10, 5), (21, 5), "y")
-head.rect((10, 7, 21, 11), "t")
-for x in (12, 18):
-    head.rect((x, 8, x + 1, 9), "c")
-head.pixel(16, 10, "c")
-head.outline("k")
-
-robot.export_png("out/bolt.png")                 # native 32×32, transparent
-robot.export_png("out/bolt-preview.png", scale=8) # crisp 256×256 preview
 ```
 
-Drawing happens in memory. Files are written only when you explicitly save or
-export. Run a script with ordinary Python:
-
-```bash
-python draw_robot.py
-```
+Edit `build_robot()` once to update the silhouette of every variant, or change
+shared palette keys to recolor every pose. Drawing happens in memory; files are
+written only when you explicitly save or export.
 
 ## Install
 
@@ -193,7 +179,7 @@ Use `layer.replace(...)` to change which keys selected pixels use. Use
 Built-in palettes are available as dictionaries:
 
 ```python
-from pixaas import presets
+from pixaas import Sprite, presets
 
 icon = Sprite(16, 16, palette=presets.get("sweetie-16").as_dict())
 ```
@@ -271,6 +257,16 @@ restored = Sprite.load("out/bolt.sprite.json")
 durations, tags, and palette when the adjacent sheet JSON is present. A flattened
 image cannot recover separate drawing layers. Without metadata, supply
 `frame_width` and `frame_height` to slice a sheet, or import a single PNG.
+
+## Troubleshooting
+
+- **An accessory covers the character:** layers composite from bottom to top;
+  layers created later start above earlier ones. Inspect and adjust the stack
+  when overlapping parts look wrong.
+- **An outline is cut off:** outlines are clipped at the canvas boundary. Leave
+  a pixel of transparent margin or enlarge the canvas before outlining.
+- **A new pose is blank:** `add_frame()` creates transparent layers. Supply
+  `copy_from=0` (or a named frame) to start from an existing drawing.
 
 ## Inspect and verify
 

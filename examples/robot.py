@@ -88,6 +88,13 @@ def build(output: Path) -> None:
         face.line((x, 9), (x + 1, 9), "c")
     robot.tag("idle", 0, 2, direction="pingpong")
     robot.export_apng(output / "bolt-idle.png", tag="idle", scale=8)
+    robot.export_gif(output / "bolt-idle.gif", tag="idle", scale=8, background="#243342")
+    for name, armor, highlight in (("ice", "#468fb5", "#9de1ed"),
+                                   ("rose", "#b65e8b", "#ffb8d1")):
+        variant = robot.copy(name=f"bolt-{name}")
+        variant.palette.set("o", armor)
+        variant.palette.set("y", highlight)
+        variant.export_png(output / f"bolt-{name}.png", scale=8, background="#243342")
     robot.export_sheet(output / "bolt-sheet.png", columns=3, padding=1)
     robot.save(output / "bolt.sprite.json")
 

@@ -93,14 +93,14 @@ Individual layers remain independently editable.
 
 ## P2 — Make the README demonstrate the value immediately
 
-- [ ] Place a rendered sprite, an animation, and palette variants near the top.
-- [ ] Put a short runnable authoring example beside those results.
-- [ ] Explain the practical benefit: edit a shared function or palette and
+- [x] Place a rendered sprite, an animation, and palette variants near the top.
+- [x] Put a short runnable authoring example beside those results.
+- [x] Explain the practical benefit: edit a shared function or palette and
   regenerate a consistent family of assets.
-- [ ] Include a clear path from installation to the first visible output.
-- [ ] Add a troubleshooting note for layer order, clipped outlines, and blank
+- [x] Include a clear path from installation to the first visible output.
+- [x] Add a troubleshooting note for layer order, clipped outlines, and blank
   frames created without `copy_from`.
-- [ ] Ensure showcased assets are reproducible from checked-in scripts.
+- [x] Ensure showcased assets are reproducible from checked-in scripts.
 
 **Acceptance criteria:** A new reader can see what PixaaS produces before reading
 the detailed API guide and can reproduce a showcased asset using documented
