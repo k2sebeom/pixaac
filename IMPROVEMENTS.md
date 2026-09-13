@@ -79,12 +79,12 @@ to the documented contract.
 The frog's bounce required separate shifts for its head, body, and bag. Start
 with a small abstraction that works with ordinary Python drawing functions.
 
-- [ ] Design a lightweight way to select named layers and apply a shared shift
+- [x] Design a lightweight way to select named layers and apply a shared shift
   within one frame.
-- [ ] Document a common origin convention for reusable drawing functions.
-- [ ] Add an example with an accessory that follows a character's movement.
-- [ ] Specify clipping and wrapping behavior for grouped shifts.
-- [ ] Evaluate a richer component/group API only after the smaller helper has
+- [x] Document a common origin convention for reusable drawing functions.
+- [x] Add an example with an accessory that follows a character's movement.
+- [x] Specify clipping and wrapping behavior for grouped shifts.
+- [x] Evaluate a richer component/group API only after the smaller helper has
   been exercised in examples.
 
 **Acceptance criteria:** The example moves the head, body, and accessory together

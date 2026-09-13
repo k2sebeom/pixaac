@@ -159,6 +159,17 @@ class Frame:
             self._sprite._data.add_layer(name)
         return Layer(self._sprite, self._data, name)
 
+    def shift_layers(self, names: Sequence[str], dx: int, dy: int, *, wrap: bool = False) -> int:
+        """Shift named layers in this frame, clipping or wrapping at the canvas.
+
+        Names are strictly resolved before editing; repeated names move once.
+        Returns the sum of the individual layers' affected-pixel counts.
+        """
+        if isinstance(names, str):
+            raise SpriteError("supply a sequence of layer names, such as ['head', 'body']")
+        layers = [self.get_layer(name) for name in dict.fromkeys(names)]
+        return sum(layer.shift(dx, dy, wrap=wrap) for layer in layers)
+
 
 class Sprite:
     """A mutable pixel-art document; Python code is its source of truth."""

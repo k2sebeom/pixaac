@@ -202,3 +202,43 @@ def test_layer_management_across_frames_and_handle_lifetime():
         sprite.remove_layer("body")
     assert sprite.layer_names() == ("body",)
     assert sprite.validate() == []
+
+
+@pytest.mark.parametrize("wrap", [False, True])
+def test_shift_layers_clipping_wrapping_and_atomic_lookup(wrap):
+    sprite = Sprite(4, 4, palette={"r": "#f00"})
+    for name in ("head", "body", "bag"):
+        sprite.layer(name).pixel(3, 0, "r")
+    sprite.layer("feet").pixel(1, 3, "r")
+    pose = sprite.add_frame("up", copy_from=0)
+    before = pose.get_layer("head").rows()
+    with pytest.raises(SpriteError, match="no layer named"):
+        pose.shift_layers(["head", "typo"], 1, 0)
+    assert pose.get_layer("head").rows() == before
+    pose.shift_layers(["head", "body", "bag", "head"], 1, 0, wrap=wrap)
+    for name in ("head", "body", "bag"):
+        assert pose.get_layer(name).rows()[0] == ("r..." if wrap else "....")
+        assert sprite.get_layer(name).rows() == before
+    assert pose.get_layer("feet").rows() == sprite.get_layer("feet").rows()
+    assert pose.shift_layers([], 1, 0) == 0
+    with pytest.raises(SpriteError, match="sequence"):
+        pose.shift_layers("head", 1, 0)
+
+
+def test_courier_example_moves_parts_together(tmp_path):
+    example = runpy.run_path(str(ROOT / "examples/courier.py"))
+    example["build"](tmp_path)
+    sprite = Sprite.load(tmp_path / "courier.sprite.json")
+    pose = sprite.frame("up")
+    assert sprite.validate() == []
+    assert pose.get_layer("feet").rows() == sprite.get_layer("feet").rows()
+    for name in ("head", "body", "bag"):
+        original = sprite.get_layer(name).rows()
+        assert pose.get_layer(name).rows() == original[2:] + ["." * 32] * 2
+    body = pose.get_layer("body").rows()
+    original_bag = sprite.get_layer("bag").rows()
+    pose.get_layer("bag").clear()
+    assert pose.get_layer("body").rows() == body
+    assert sprite.get_layer("bag").rows() == original_bag
+    restored = Sprite.from_png(tmp_path / "courier-sheet.png")
+    assert restored.render().tobytes() == sprite.render().tobytes()

@@ -291,6 +291,41 @@ Pixels shifted past the canvas edge are discarded unless `wrap=True`.
 square canvas, and `mirror` copies one half to the other. `stretch` uses
 nearest-neighbor sampling and preserves the region's border pixels.
 
+### Move related parts together
+
+Select named layers in one frame with `frame.shift_layers(names, dx, dy)`:
+
+```python
+from examples.courier import build_courier
+
+courier = build_courier()
+# Its "up" pose was made with this single operation:
+pose = courier.add_frame("higher", copy_from=0, duration_ms=140)
+pose.shift_layers(["head", "body", "bag"], 0, -2)
+assert pose.get_layer("feet").rows() == courier.get_layer("feet").rows()
+# Each part is still an ordinary, independently editable layer.
+pose.get_layer("bag").pixel(24, 20, "h")
+```
+
+Run `python examples/courier.py` and open `out/courier/courier-bounce.gif`, or
+watch it with `python -m pixaas.preview examples/courier.py --sprite courier`.
+The [complete courier example](examples/courier.py) moves its head, body, and bag
+together while its feet and original frame stay unchanged.
+
+For reusable parts, use a shared **character origin**: `(x, y)` is the top-left
+of the character's bounding box, and every part adds its own local offsets.
+Pass the same origin to each drawing function. This gives the accessory and
+character a common coordinate system without storing extra transform state.
+
+`shift_layers` resolves all names strictly before changing pixels. Duplicate
+names are moved once, an empty selection does nothing, and the return value
+sums the individual affected-pixel counts. It affects only the selected frame.
+Pixels leaving the canvas are discarded; `wrap=True` wraps each layer around
+the entire canvas. Layers keep their names, stacking order, and editability.
+This helper is sufficient for the complete courier example; persistent component
+objects, nested groups, and transform hierarchies are deferred until examples
+need capabilities that ordinary drawing functions and explicit selections lack.
+
 ## Render and export
 
 | Output | Method | Use |
