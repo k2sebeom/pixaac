@@ -54,11 +54,39 @@ def render_frame(
 
 
 def upscale(img: Image.Image, scale: int) -> Image.Image:
-    if scale < 1:
-        raise SpriteError("scale must be >= 1")
+    _integer_option("scale", scale, minimum=1)
     if scale == 1:
         return img
     return img.resize((img.width * scale, img.height * scale), Image.Resampling.NEAREST)
+
+
+def _integer_option(name: str, value: int, *, minimum: int = 0) -> None:
+    if type(value) is not int or value < minimum:
+        raise SpriteError(f"{name} must be an integer >= {minimum}")
+
+
+def _extruded(img: Image.Image, border: int) -> Image.Image:
+    """Duplicate outer texels, including corners; preserve RGBA bytes exactly."""
+    if not border:
+        return img
+    w, h = img.size
+    out = Image.new("RGBA", (w + 2 * border, h + 2 * border))
+    out.paste(img, (border, border))
+    # Nine patches avoid a full-image Python pixel loop.
+    for left, top, right, bottom, box in (
+        (0, 0, w, 1, (border, 0, border + w, border)),
+        (0, h - 1, w, h, (border, border + h, border + w, h + 2 * border)),
+        (0, 0, 1, h, (0, border, border, border + h)),
+        (w - 1, 0, w, h, (border + w, border, w + 2 * border, border + h)),
+        (0, 0, 1, 1, (0, 0, border, border)),
+        (w - 1, 0, w, 1, (w + border, 0, w + 2 * border, border)),
+        (0, h - 1, 1, h, (0, h + border, border, h + 2 * border)),
+        (w - 1, h - 1, w, h,
+         (w + border, h + border, w + 2 * border, h + 2 * border)),
+    ):
+        patch = img.crop((left, top, right, bottom))
+        out.paste(patch.resize((box[2] - box[0], box[3] - box[1]), Image.Resampling.NEAREST), box)
+    return out
 
 
 def with_background(img: Image.Image, color: str | None) -> Image.Image:
@@ -121,12 +149,18 @@ def build_sheet(
     padding: int = 0,
     scale: int = 1,
     tag: str | None = None,
+    extrude: int = 0,
 ) -> tuple[Image.Image, dict]:
     """Pack frames into a grid sheet and return (image, metadata).
 
     Metadata follows the shape of Aseprite's JSON "array" export so existing
     game-engine importers can consume it.
     """
+    _integer_option("scale", scale, minimum=1)
+    _integer_option("padding", padding)
+    _integer_option("extrude", extrude)
+    if columns is not None:
+        _integer_option("columns", columns, minimum=1)
     indices = sprite.tag(tag).frame_indices() if tag else list(range(len(sprite.frames)))
     # Packing is always in source order; tags describe playback separately.
     seen = sorted(set(indices))
@@ -136,18 +170,19 @@ def build_sheet(
     cols = max(1, min(cols, n))
     rows = math.ceil(n / cols)
     fw, fh = sprite.width * scale, sprite.height * scale
-    sheet_w = cols * fw + (cols + 1) * padding
-    sheet_h = rows * fh + (rows + 1) * padding
+    cell_w, cell_h = fw + 2 * extrude, fh + 2 * extrude
+    sheet_w = cols * cell_w + (cols + 1) * padding
+    sheet_h = rows * cell_h + (rows + 1) * padding
     sheet = Image.new("RGBA", (sheet_w, sheet_h), (0, 0, 0, 0))
 
     frames_meta = []
     for k, fi in enumerate(seen):
         f = sprite.frames[fi]
         c, r = k % cols, k // cols
-        x = padding + c * (fw + padding)
-        y = padding + r * (fh + padding)
+        x = padding + c * (cell_w + padding) + extrude
+        y = padding + r * (cell_h + padding) + extrude
         img = upscale(render_frame(f, sprite.palette, sprite.width, sprite.height), scale)
-        sheet.alpha_composite(img, (x, y))
+        sheet.paste(_extruded(img, extrude), (x - extrude, y - extrude))
         frames_meta.append(
             {
                 "filename": f"{sprite.name}_{fi}_{f.name}",
@@ -166,7 +201,7 @@ def build_sheet(
     meta = {
         "frames": frames_meta,
         "meta": {
-            "app": "pixaas",
+            "app": "pixaac",
             "version": "0.2",
             "tagIndexSpace": "exported",
             "name": sprite.name,
@@ -177,6 +212,7 @@ def build_sheet(
             "columns": cols,
             "rows": rows,
             "padding": padding,
+            "extrude": extrude,
             "frameTags": [
                 {"name": t.name, "from": positions[t.start], "to": positions[t.end], "direction": t.direction, "repeat": "0" if t.loop else "1"}
                 for t in sprite.tags
@@ -197,8 +233,9 @@ def export_sheet(
     scale: int = 1,
     tag: str | None = None,
     metadata: bool = True,
+    extrude: int = 0,
 ) -> tuple[Path, Path | None]:
-    sheet, meta = build_sheet(sprite, columns, padding, scale, tag)
+    sheet, meta = build_sheet(sprite, columns, padding, scale, tag, extrude)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(p, "PNG")
@@ -285,6 +322,26 @@ def export_apng(
 
 def _to_gif_frame(img: Image.Image) -> Image.Image:
     """Convert RGBA -> P with index 0 reserved for fully transparent pixels."""
+    # Quantizers may merge close colors even below the color limit. Pixel art
+    # with a small palette must bypass them to retain every deliberate shade.
+    colors: dict[tuple[int, int, int], int] = {}
+    indices = bytearray()
+    for r, g, b, a in img.get_flattened_data():
+        if a < 128:
+            indices.append(0)
+            continue
+        color = (r, g, b)
+        if color not in colors:
+            if len(colors) == 255:
+                break
+            colors[color] = len(colors) + 1
+        indices.append(colors[color])
+    else:
+        exact = Image.frombytes("P", img.size, bytes(indices))
+        palette = [0, 0, 0] + [channel for color in colors for channel in color]
+        exact.putpalette(palette + [0] * (768 - len(palette)))
+        exact.info["transparency"] = 0
+        return exact
     alpha = img.getchannel("A")
     rgb = img.convert("RGB")
     pal = rgb.quantize(colors=255, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)

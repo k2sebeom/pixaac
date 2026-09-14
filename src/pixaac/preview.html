@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PixaaC preview</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%239de1ed' d='M2 2h12v12H2z'/%3E%3Cpath fill='%23172332' d='M5 5h6v6H5z'/%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #172332; color: #e5ece0; }
+  body { max-width: 1400px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 24px; margin-bottom: 8px; }
+  #status { color: #9de1ed; }
+  .controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 20px 0; }
+  button, select { font: inherit; padding: 8px 12px; border: 1px solid #819da6; border-radius: 6px; background: #243342; color: inherit; max-width: 100%; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  label { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+  label select { min-width: 0; }
+  input { accent-color: #9de1ed; }
+  .panes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .panes.comparing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pane { min-width: 0; }
+  .stage { height: 50vh; min-height: 240px; overflow: auto; background: #243342; border-radius: 8px; padding: 24px; }
+  .surface { position: relative; background-color: #c8c8c8;
+    background-image: conic-gradient(#8c8c8c 25%, transparent 0 50%, #8c8c8c 0 75%, transparent 0);
+    background-size: 16px 16px; }
+  .surface img { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+  .onion, .grid { pointer-events: none; }
+  #onion-previous { filter: url(#previous-tint); }
+  #onion-next { filter: url(#next-tint); }
+  .grid { position: absolute; inset: 0; box-shadow: inset -1px -1px #17233266;
+    background-image: linear-gradient(to right, #17233266 1px, transparent 1px), linear-gradient(to bottom, #17233266 1px, transparent 1px);
+    background-size: var(--zoom) var(--zoom); }
+  /* At native size every pixel is a boundary; omit interior lines to keep art legible. */
+  .surface.native .grid { background-image: none; }
+  .caption, .coordinates { font-variant-numeric: tabular-nums; min-height: 1.5em; overflow-wrap: anywhere; }
+  .coordinates { color: #9de1ed; }
+  .hint { color: #b2c2ca; font-size: 14px; }
+  #error { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid #f3a083; background: #412c31; color: #ffd5c7; }
+  [hidden] { display: none !important; }
+  @media (max-width: 650px) {
+    body { padding: 0 12px; }
+    .stage { padding: 12px; }
+    .panes.comparing { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+<h1>PixaaC preview</h1>
+<p id="status" role="status">Building preview…</p>
+<div class="controls">
+  <label>Sprite <select id="sprite" aria-label="Sprite"></select></label>
+  <label>Animation <select id="tag" aria-label="Animation"></select></label>
+  <label>Zoom <select id="zoom" aria-label="Zoom">
+    <option value="1">1×</option><option value="2">2×</option><option value="4">4×</option>
+    <option value="8" selected>8×</option><option value="12">12×</option><option value="16">16×</option>
+  </select></label>
+  <label><input id="grid" type="checkbox">Pixel grid</label>
+  <label><input id="compare" type="checkbox">Compare</label>
+</div>
+<div class="controls">
+  <label style="color: #ff87b2"><input id="show-previous" type="checkbox">Previous pose (pink)</label>
+  <label style="color: #65e3ed"><input id="show-next" type="checkbox">Next pose (cyan)</label>
+  <label>Onion opacity <input id="opacity" type="range" min="0" max="100" value="25"><output id="opacity-value" for="opacity">25%</output></label>
+</div>
+<p class="hint">Onion skins follow the animation order, including during playback. Hover either image for native pixel coordinates.
+  At 1× the grid shows only the image edge.</p>
+<div id="panes" class="panes">
+  <section class="pane" aria-label="Primary preview">
+    <div id="stage" class="stage">
+      <div id="surface" class="surface" hidden>
+        <img id="image" alt="Selected sprite frame">
+        <img id="onion-previous" class="onion" alt="" hidden>
+        <img id="onion-next" class="onion" alt="" hidden>
+        <div id="pixel-grid" class="grid" hidden></div>
+      </div>
+    </div>
+    <p id="frame" class="caption" aria-live="polite"></p>
+    <p id="coordinates" class="coordinates">Pixel: —</p>
+    <div class="controls">
+      <button id="previous" aria-label="Previous frame">← Previous</button>
+      <button id="play">Play</button>
+      <button id="next" aria-label="Next frame">Next →</button>
+      <label>Pose <select id="pose" aria-label="Pose"></select></label>
+    </div>
+  </section>
+  <section id="comparison" class="pane" aria-label="Comparison preview" hidden>
+    <div id="comparison-stage" class="stage">
+      <div id="comparison-surface" class="surface" hidden>
+        <img id="comparison-image" alt="Comparison sprite frame">
+        <div id="comparison-grid" class="grid" hidden></div>
+      </div>
+    </div>
+    <p id="comparison-caption" class="caption" aria-live="polite"></p>
+    <p id="comparison-coordinates" class="coordinates">Pixel: —</p>
+    <div class="controls">
+      <label>Compare sprite <select id="comparison-sprite" aria-label="Compare sprite"></select></label>
+      <label>Compare frame <select id="comparison-frame" aria-label="Compare frame"></select></label>
+    </div>
+  </section>
+</div>
+<pre id="error" role="alert" hidden></pre>
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <filter id="previous-tint" color-interpolation-filters="sRGB">
+      <feFlood flood-color="#ff87b2"/><feComposite in2="SourceAlpha" operator="in"/>
+    </filter>
+    <filter id="next-tint" color-interpolation-filters="sRGB">
+      <feFlood flood-color="#65e3ed"/><feComposite in2="SourceAlpha" operator="in"/>
+    </filter>
+  </defs>
+</svg>
+<script type="module" src="/preview.mjs"></script>
+</html>

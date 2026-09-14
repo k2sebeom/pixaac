@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from pixaas import api, ops, render, view
-from pixaas.model import Palette, Sprite, SpriteError, parse_color, parse_grid
+from pixaac import api, ops, render, view
+from pixaac.model import Palette, Sprite, SpriteError, parse_color, parse_grid
 
 
 # --------------------------------------------------------------------------- #
@@ -466,7 +466,7 @@ def test_onion_skin_view(tmp_path: Path):
 
 
 def test_palette_presets(tmp_path: Path):
-    from pixaas import presets
+    from pixaac import presets
 
     p = tmp_path / "p.sprite.json"
     api.new(p, 4, 4)
@@ -979,7 +979,7 @@ def test_import_metadata_frame_size_override_note(tmp_path: Path):
 
 
 def test_resize_anchor_validation_and_show(tmp_path: Path):
-    from pixaas.model import ANCHORS, anchor_offset, normalize_anchor
+    from pixaac.model import ANCHORS, anchor_offset, normalize_anchor
 
     assert normalize_anchor("Bottom_Right") == "bottom-right"
     assert normalize_anchor("middle") == "center"

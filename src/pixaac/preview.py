@@ -1,4 +1,4 @@
-"""Optional local preview: ``python -m pixaas.preview art.py``.
+"""Optional local preview: ``python -m pixaac.preview art.py``.
 
 Only this module loads the watcher/server. Authoring scripts expose
 ``preview_assets`` as a Sprite, a name-to-Sprite mapping, or a zero-argument
@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import traceback
+from urllib.parse import urlencode, urlsplit
 
 from .sdk import Sprite
 
@@ -27,7 +28,7 @@ def collect_assets(script: Path) -> dict:
     """Execute once in the worker and serialize native-resolution previews."""
     sys.path.insert(0, str(script.parent))
     sys.argv = [str(script)]
-    namespace = runpy.run_path(str(script), run_name="__pixaas_preview__")
+    namespace = runpy.run_path(str(script), run_name="__pixaac_preview__")
     assets = namespace.get("preview_assets")
     if callable(assets):
         assets = assets()
@@ -96,13 +97,13 @@ class Preview:
         with self.lock:
             self.state["building"] = True
         try:
-            with tempfile.TemporaryDirectory(prefix="pixaas-preview-") as directory:
+            with tempfile.TemporaryDirectory(prefix="pixaac-preview-") as directory:
                 output = Path(directory) / "preview.json"
                 # A fresh process avoids stale imports and accumulated authoring state.
                 # A fresh bytecode cache also catches same-size edits in one second.
                 env = {**os.environ, "PYTHONPYCACHEPREFIX": str(Path(directory) / "pycache")}
                 completed = subprocess.run(
-                    [sys.executable, "-m", "pixaas.preview", "--worker", str(self.script), str(output)],
+                    [sys.executable, "-m", "pixaac.preview", "--worker", str(self.script), str(output)],
                     capture_output=True, text=True, timeout=self.timeout, env=env,
                 )
                 if completed.returncode:
@@ -137,10 +138,14 @@ class Preview:
 def make_server(preview: Preview, port: int) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path == "/":
+            path = urlsplit(self.path).path
+            if path == "/":
                 content = Path(__file__).with_name("preview.html").read_bytes()
                 content_type = "text/html; charset=utf-8"
-            elif self.path == "/state":
+            elif path == "/preview.mjs":
+                content = Path(__file__).with_name("preview.mjs").read_bytes()
+                content_type = "text/javascript; charset=utf-8"
+            elif path == "/state":
                 content = json.dumps(preview.snapshot()).encode()
                 content_type = "application/json"
             else:
@@ -183,10 +188,8 @@ def main(argv: list[str] | None = None) -> None:
     server = make_server(preview, options.port)
     worker = threading.Thread(target=preview.watch, daemon=True)
     worker.start()
-    from urllib.parse import urlencode
-
     query = "?" + urlencode({"sprite": options.sprite}) if options.sprite else ""
-    print(f"PixaaS preview: http://127.0.0.1:{server.server_port}/{query}", flush=True)
+    print(f"PixaaC preview: http://127.0.0.1:{server.server_port}/{query}", flush=True)
     print(f"Watching {root} — Ctrl-C to stop", flush=True)
     try:
         server.serve_forever(poll_interval=0.25)

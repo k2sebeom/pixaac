@@ -6,8 +6,8 @@ import runpy
 from PIL import Image
 import pytest
 
-from pixaas import Palette, Sprite, SpriteError
-from pixaas import model
+from pixaac import Palette, Sprite, SpriteError
+from pixaac import model
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,14 +93,14 @@ def test_exports_and_import_preserve_pixels_and_timing(tmp_path):
         assert image.size == (12, 12)
         assert image.getpixel((3, 3)) == (255, 0, 0, 136)
     sheet, meta = sprite.export_sheet(tmp_path / "sheet.png", columns=2, padding=1)
-    assert json.loads(meta.read_text())["meta"]["app"] == "pixaas"
+    assert json.loads(meta.read_text())["meta"]["app"] == "pixaac"
     restored = Sprite.from_png(sheet)
     assert [f.name for f in restored.frames] == ["frame0", "up"]
     assert [f.duration_ms for f in restored.frames] == [100, 120]
     for i in range(2):
         assert restored.render(frame=i).tobytes() == sprite.render(frame=i).tobytes()
     saved = sprite.save(tmp_path / "snapshot.sprite.json")
-    assert json.loads(saved.read_text())["format"] == "pixaas"
+    assert json.loads(saved.read_text())["format"] == "pixaac"
     assert Sprite.load(saved).layer("body").rows() == sprite.layer("body").rows()
     sprite.export_apng(tmp_path / "idle.png", tag="idle")
     with Image.open(tmp_path / "idle.png") as image:
@@ -111,8 +111,13 @@ def test_exports_and_import_preserve_pixels_and_timing(tmp_path):
     assert len(sprite.export_frames(tmp_path / "frames")) == 2
 
 
-def test_legacy_documents_still_load():
-    sprite = Sprite.load(ROOT / "examples/hero.sprite.json")
+@pytest.mark.parametrize("format_name", [None, "agentsprite", "pixaas", "pixaac"])
+def test_legacy_documents_still_load(tmp_path, format_name):
+    data = json.loads((ROOT / "examples/hero.sprite.json").read_text())
+    data["format"] = format_name
+    path = tmp_path / "legacy.sprite.json"
+    path.write_text(json.dumps(data))
+    sprite = Sprite.load(path)
     assert sprite.validate() == []
     assert sprite.render().size == (sprite.width, sprite.height)
 

@@ -1,4 +1,4 @@
-"""PixaaS — Pixel Art as a Code."""
+"""PixaaC — Pixel Art as a Code."""
 
 from .model import Palette, SpriteError, Tag
 from .sdk import Frame, Layer, Sprite

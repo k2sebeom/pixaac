@@ -6,7 +6,7 @@ Every drawing function uses (x, y) as the top-left of the whole character's
 from pathlib import Path
 import sys
 
-from pixaas import Layer, Sprite
+from pixaac import Layer, Sprite
 
 
 PALETTE = {

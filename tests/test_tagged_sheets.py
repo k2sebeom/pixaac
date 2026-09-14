@@ -3,7 +3,7 @@ import json
 from PIL import Image
 import pytest
 
-from pixaas import Sprite
+from pixaac import Sprite
 
 
 def animation(path):
@@ -50,6 +50,7 @@ def test_legacy_source_index_sheets(tmp_path, direction):
     sheet, metadata = sprite.export_sheet(tmp_path / "legacy.png", tag="old")
     data = json.loads(metadata.read_text())
     data["meta"].pop("tagIndexSpace")
+    data["meta"]["app"] = "pixaas"
     data["meta"]["version"] = "0.1"
     for frame in data["frames"]:
         frame["index"] = frame.pop("sourceIndex")

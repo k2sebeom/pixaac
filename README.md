@@ -1,4 +1,4 @@
-# PixaaS
+# PixaaC
 
 **Pixel Art as a Code.**
 
@@ -9,35 +9,63 @@ The script is the source of truth. A sprite is the result of running it.
 Change a palette, adjust a shape, or fix a drawing function, then rebuild every
 asset that uses it.
 
-| Sprite | Idle animation | Ice palette | Rose palette |
-| --- | --- | --- | --- |
-| ![BOLT robot](docs/images/bolt-preview.png) | ![BOLT bouncing and blinking](docs/images/bolt-idle.gif) | ![Ice BOLT](docs/images/bolt-ice.png) | ![Rose BOLT](docs/images/bolt-rose.png) |
+![Moonlit Market: an animated apothecary beneath a crescent moon](docs/images/moonlit-shop.gif)
+
+| Lantern fox | Arctic palette | Potion variants |
+| --- | --- | --- |
+| ![Fox breathing, blinking, and carrying a lantern](docs/images/moonlit-fox.gif) | ![Arctic fox with the same warm lantern light](docs/images/moonlit-arctic.gif) | ![Mint, rose, and amber potions built from shared geometry](docs/images/moonlit-potions.png) |
+
+[Moonlit Market](examples/moonlit_market.py) builds all six assets from Python:
+two 40×40 fox variants, three 24×24 potions, and a 96×64 animated shop. The fox
+curls its tail, swings its lantern, and blinks; palette variants share geometry
+while keeping fur and lantern colors independent.
+
+## Quick start
 
 From a checkout, install with `python -m pip install .`, then run
-`python examples/robot.py`. Open `out/bolt-preview.png` or `out/bolt-idle.gif`
-to see your first output. The images above come from that checked-in script;
-regenerate the documentation images with `python examples/robot.py docs/images`.
+`python examples/moonlit_market.py`. Open `out/moonlit-market/contact-sheet.png`
+to see the asset set, or `out/moonlit-market/fox.gif` and `shop.gif` to see the
+animations. The build also produces native PNGs, APNGs, sprite sheets with JSON,
+and editable snapshots.
 
-Try this from the checkout root (save as `draw_robot.py`, then run
-`python draw_robot.py`):
+Try this from the checkout root (save as `draw_fox.py`, then run
+`python draw_fox.py`):
 
 ```python
-from examples.robot import build_robot
+from examples.moonlit_market import build_fox
 
-robot = build_robot()
-robot.export_png("out/bolt.png")
-robot.export_png("out/bolt-preview.png", scale=8)
+fox = build_fox()
+fox.export_png("out/fox.png")
+fox.export_gif("out/fox-idle.gif", tag="idle", scale=6)
+fox.export_sheet("out/fox-sheet.png", columns=4, padding=2, extrude=1)
 
-ice = robot.copy(name="bolt-ice")
-ice.palette.set("o", "#468fb5")
-ice.palette.set("y", "#9de1ed")
-ice.export_png("out/bolt-ice.png", scale=8)
-head = robot.layer("head")
+arctic = fox.copy(name="arctic-fox")
+arctic.palette.set("F", "#c9e0dd")  # Fur base; lantern light has its own keys.
+arctic.palette.set("O", "#799cac")
+arctic.palette.set("H", "#e8eac1")
+arctic.export_png("out/arctic-fox.png", scale=6)
 ```
 
-Edit `build_robot()` once to update the silhouette of every variant, or change
+Edit `build_fox()` once to update the silhouette of every variant, or change
 shared palette keys to recolor every pose. Drawing happens in memory; files are
 written only when you explicitly save or export.
+
+## Recent improvements
+
+- **Inspect while drawing:** live reload, native pixel coordinates, a pixel grid,
+  pink/cyan onion skins, and independent pose or palette comparison. Comparison
+  panes stack on narrow screens, and script errors retain the last good images.
+- **Compose without accidental recoloring:** `Layer.blit()` imports missing
+  palette keys and requires explicit mappings for color conflicts.
+- **Export dependable textures:** optional sheet-edge extrusion, validated
+  dimensions, and frame metadata that preserves animation order and timing.
+- **Keep deliberate shades:** GIF export preserves exact colors for frames
+  with up to 255 visible RGB colors. APNG preserves full RGBA.
+
+The [feedback log](IMPROVEMENTS.md) records the art-driven iterations. The latest
+verification includes 140 passing tests, isolated-wheel checks, and a
+[connected-browser pass](docs/browser-feedback.md) covering playback, layout,
+source edits, and error recovery.
 
 ## Install
 
@@ -51,18 +79,18 @@ For development:
 
 ```bash
 uv sync
-uv run python examples/robot.py
+uv run python examples/moonlit_market.py
 uv run pytest
 ```
 
-Pillow is the only runtime dependency. PixaaS runs locally and works in scripts,
+Pillow is the only runtime dependency. PixaaC runs locally and works in scripts,
 notebooks, build jobs, and agent coding environments.
 
 ## Watch a live preview
 
 ```bash
-python -m pixaas.preview examples/robot.py --sprite bolt
-# With uv: uv run python -m pixaas.preview examples/robot.py
+python -m pixaac.preview examples/moonlit_market.py --sprite fox
+# With uv: uv run python -m pixaac.preview examples/moonlit_market.py --sprite fox
 ```
 
 Open the printed local URL (normally <http://127.0.0.1:8765>) once. Save changes
@@ -72,14 +100,48 @@ nearest-neighbor zoom. Transparency appears over a checkerboard; frame names
 and durations are displayed below the image. A failed script shows its traceback
 while keeping the last successful images. Fix it and save to resume updates.
 
+Hover either image to read native pixel `(x, y)` coordinates, starting at `(0, 0)`
+in the top-left corner. The readout follows zoom and scrolling and clears outside
+the visible image. **Pixel grid** marks native pixel boundaries at 2× and above;
+at 1× it shows only the outer edge so the image stays legible. Zoom and grid
+choices survive rebuilds.
+
+**Previous pose** (pink) and **Next pose** (cyan) independently overlay adjacent
+poses on the primary image. Adjust **Onion opacity** from 0–100%. Overlays remain
+visible during playback and follow the selected tag's forward, reverse, or
+pingpong sequence. They wrap for looping tags; one-shot boundaries omit the
+missing neighbor and stepping stops at either end. Single-frame selections show
+no onion skins. **Pose** selects a position in the playback sequence and pauses.
+
+Enable **Compare** for a second pane with independent sprite and frame selectors.
+Both panes share zoom and grid settings and align their canvas origins at the
+top left. Below 651 px viewport width, the panes stack vertically to keep the
+art and controls usable. The second pane holds its selected pose while the
+primary pane plays; each pane labels its asset, frame, and duration. Rebuilds retain available asset
+and frame names (including the current pingpong occurrence). A removed frame
+falls back to the first available pose; a removed asset falls back to the first
+available asset. All overlays are browser-only and never enter exported images.
+
+Select `fox` and compare it with `arctic`: their lanterns match at pixel
+`(5, 31)` while their fur differs. Choose `shop` to inspect the animated scene,
+or `mint`, `rose`, and `amber` to compare the potion palettes. The
+[refinement notes](docs/moonlit-market-refinement.md) explain the palette roles
+and provide a coordinate-based inspection walkthrough.
+
 Expose a module-level `preview_assets` value or a zero-argument function:
 
 ```python
+from examples.moonlit_market import build_fox
+
 def preview_assets():
-    return {"bolt": robot, "ice": ice}  # Or return one Sprite directly.
+    fox = build_fox()
+    arctic = fox.copy(name="arctic-fox")
+    for key, color in {"F": "#c9e0dd", "O": "#799cac", "H": "#e8eac1"}.items():
+        arctic.palette.set(key, color)
+    return {"fox": fox, "arctic": arctic}  # Or return one Sprite directly.
 ```
 
-The [robot script](examples/robot.py) builds these assets in the function.
+The [Moonlit Market script](examples/moonlit_market.py) exposes all six assets.
 The watcher executes your script in a fresh Python process on each rebuild,
 with the script's directory on the import path. Its `if __name__ == "__main__":`
 block is skipped, so put batch exports there and expose preview assets outside
@@ -91,12 +153,20 @@ there; otherwise its containing directory is watched. This includes local art
 modules, new files, and deletions. Generated `out/`, virtual environments, build
 folders, and hidden directories are skipped. Add other source locations with
 repeatable `--watch ../shared-art` options. Non-Python inputs can be watched by
-passing their individual file paths. `--sprite ice` selects an initial asset;
-`--port 9000` changes the port. Builds time out after 30 seconds.
+passing their individual file paths. `--sprite arctic` selects an initial asset;
+asset names are URL-encoded automatically. If the requested name is missing,
+the preview shows the first available asset and a message explaining the
+fallback. `--port 9000` changes the port. Builds time out after 30 seconds.
 
 Preview is optional, binds only to localhost, and uses Python's standard library
 plus the existing Pillow dependency. Ordinary SDK imports start no server or
 watcher. Stop it with Ctrl-C; the Python script remains the source of truth.
+
+For development, `uv run pytest` includes HTTP, watcher, export, and preview
+controller regression checks. The client checks use Node.js 22+ when installed
+(otherwise pytest reports a skip); run them directly with
+`node --test tests/preview.test.mjs`. They use a small DOM adapter, so a browser
+pass is still needed to verify rendering and interaction.
 
 ## The programming model
 
@@ -119,18 +189,19 @@ surface they draw on, so independent sprites can be built in the same process.
 
 ## Manage the layer stack
 
-`robot.layer_names()` lists names from bottom to top. `frame.layers` returns
+`fox.layer_names()` lists names from bottom to top. `frame.layers` returns
 live layer handles in that same order. `layer(name)` gets or creates a layer;
 `get_layer(name)` on a sprite or frame is strict and raises `SpriteError` with
 available names when a layer is missing.
 
 ```python
-print(robot.layer_names())
-accessory = robot.get_layer("tool")
-robot.move_layer("tool", to=robot.layer_names().index("body"))
-robot.rename_layer("tool", "wrench")
-assert accessory.name == "wrench"
-# The wrench now sits behind the body in every frame.
+stack = fox.copy(name="fox-layer-study")
+print(stack.layer_names())
+lantern = stack.get_layer("lantern")
+stack.move_layer("lantern", to=stack.layer_names().index("arm"))
+stack.rename_layer("lantern", "hand-lantern")
+assert lantern.name == "hand-lantern"
+# The lantern now sits behind the arm in every frame.
 ```
 
 Moving, renaming, and removing layers affect **every frame**, including blank
@@ -148,14 +219,15 @@ Use geometry for silhouettes and palette-key grids for small, deliberate details
 Both write to the same pixel surface.
 
 ```python
-details = robot.layer("details")
-details.polygon([(25, 15), (27, 13), (29, 15), (27, 17)], "s")
-details.line((27, 17), (27, 24), "w")
+study = fox.copy(name="fox-detail-study")
+details = study.layer("sparkles")
+details.polygon([(31, 5), (33, 3), (35, 5), (33, 7)], "y")
+details.line((33, 8), (33, 10), "w")
 details.stamp(
     "kkk\n"
     "kwk\n"
     "kkk",
-    x=14, y=21,
+    x=3, y=17,
 )
 ```
 
@@ -169,9 +241,10 @@ details.stamp(
 | Polygon | `layer.polygon([(2, 7), (5, 2), (8, 7)], "o")` |
 | Flood fill | `layer.fill(5, 5, "o")` |
 | Stamp | `layer.stamp("kk\nko", x=4, y=6)` |
+| Copy a layer | `layer.blit(source_layer, x=4, y=6)` |
 | Replace a layer | `layer.set_grid("..kk..\n.kook.\n..kk..")` |
 | Outline | `layer.outline("k", outer_only=True)` |
-| Recolor pixels | `layer.replace({"o": "s", "y": "w"})` |
+| Recolor pixels | `layer.replace({"o": "v", "y": "w"})` |
 | Erase a region | `layer.clear(region=(2, 3, 8, 7))` |
 
 Drawing and transform methods mutate the selected layer and return an
@@ -205,26 +278,21 @@ A component is an ordinary function. Give it a layer, an origin, and parameters.
 Use loops for repeated details and conditionals for visual variants.
 
 ```python
-from pixaas import Layer
+from pixaac import Layer
 
-def rivet(layer: Layer, x: int, y: int):
-    layer.stamp("kk\nkw", x=x, y=y)
+def sparkle(layer: Layer, x: int, y: int, key: str = "y"):
+    layer.stamp(f".{key}.\n{key}{key}{key}\n.{key}.", x=x - 1, y=y - 1)
 
-def vent(layer: Layer, x: int, y: int, slots: int = 3):
-    for offset in range(slots):
-        layer.line((x + offset * 2, y), (x + offset * 2, y + 1), "k")
-
-for x in (11, 19):
-    rivet(details, x, 17)
-vent(details, 13, 22)
+for x, y in ((34, 12), (4, 8)):
+    sparkle(details, x, y)
 ```
 
-Keep the head, body, held tool, and effects on separate layers when they need to
+Keep the head, body, tail, lantern, and effects on separate layers when they need to
 move independently. Put shared palettes and drawing functions in regular Python
 modules. Rebuilding an asset set is a loop over those functions.
 
-The [mechanic robot example](examples/robot.py) demonstrates a complete asset
-factory with a reusable palette, separate parts, and an idle animation.
+The [Moonlit Market example](examples/moonlit_market.py) uses reusable stars,
+trees, tail poses, and arm poses alongside its fox, potion, and shop factories.
 
 ## Generate variants
 
@@ -232,45 +300,77 @@ Changing a palette entry changes every pixel using that key across all frames.
 Copies have independent palettes, pixels, and animation metadata.
 
 ```python
-ice_robot = robot.copy(name="bolt-ice")
-ice_robot.palette.set("o", "#468fb5")
-ice_robot.palette.set("y", "#9de1ed")
-ice_robot.export_png("out/bolt-ice.png")
+arctic = fox.copy(name="arctic-fox")
+for key, color in {
+    "F": "#c9e0dd", "O": "#799cac", "H": "#e8eac1",
+    "r": "#655986", "p": "#a397bb",
+}.items():
+    arctic.palette.set(key, color)
+arctic.export_gif("out/arctic-idle.gif", tag="idle", scale=6)
 ```
 
 Use `layer.replace(...)` to change which keys selected pixels use. Use
 `sprite.palette.set(...)` to change what those keys look like.
 
+Use separate keys for materials that should recolor independently. The fox's
+fur uses `F/O/H/C`; its lantern uses `L/E/G/I`. A fur highlight and lantern glow
+can start with the same RGB value without becoming coupled during recoloring.
+
 Built-in palettes are available as dictionaries:
 
 ```python
-from pixaas import Sprite, presets
+from pixaac import Sprite, presets
 
 icon = Sprite(16, 16, palette=presets.get("sweetie-16").as_dict())
 ```
 
 Presets include `pico-8`, `sweetie-16`, `endesga-32`, `gameboy`, and `1bit`.
 
-## Animate named frames
+### Compose assets with different palettes
 
-Duplicate a pose, change the relevant layers, then name the playback range.
-New frames are blank unless `copy_from` is supplied.
+`Layer.blit()` copies another layer's pixels at an integer offset and clips at
+the destination canvas. Missing palette keys are imported; existing keys must
+have matching RGBA colors. A conflict raises `SpriteError` before changing pixels
+or the palette. Explicit mappings resolve conflicting keys:
 
 ```python
-robot.frame(0).duration_ms = 180
+from examples.moonlit_market import PALETTE, preview_assets
+from pixaac import Sprite
 
-up = robot.add_frame("up", copy_from=0, duration_ms=120)
-up.layer("head").shift(0, -1)
+assets = preview_assets()
+pair = Sprite(88, 44, palette=PALETTE, name="fox-pair")
+for name, x, mapping in (
+    ("fox", 2, {}),
+    ("arctic", 46, {"F": "A", "O": "B", "H": "D", "r": "R", "p": "P"}),
+):
+    for part in assets[name].frame().layers:
+        pair.layer(f"{name}/{part.name}").blit(part, x=x, y=2, mapping=mapping)
+pair.export_png("out/fox-pair.png", scale=4)
+```
 
-blink = robot.add_frame("blink", copy_from=0, duration_ms=100)
-face = blink.layer("head")
-face.replace({"c": "t"})
-for x in (12, 18):
-    face.line((x, 9), (x + 1, 9), "c")
+New mapped keys receive the source color. Mapping to an existing key deliberately
+uses the destination color, allowing explicit recoloring. Distinct material keys
+remain distinct even when their colors match. Only keys inside the clipped
+placement are imported. Transparency skips existing pixels unless
+`overwrite=True`; that option clears them. Copying snapshots the source pixels,
+so overlapping self-copy is safe. Source visibility and opacity are not copied.
+Each call is atomic; a loop over several layers is a series of separate edits.
 
-robot.tag("idle", 0, 2, direction="pingpong")
-robot.export_apng("out/bolt-idle.png", tag="idle", scale=8)
-robot.export_sheet("out/bolt-sheet.png", columns=3, padding=1)
+## Animate named frames
+
+The fox factory already supplies `frame0`, `breathe-in`, `blink`, and `exhale`,
+with `idle`, `breathing`, and `reverse-reaction` tags. Extend it by duplicating a
+pose, changing the relevant layers, and naming a playback range. New frames are
+blank unless `copy_from` is supplied.
+
+```python
+motion = build_fox()
+look_up = motion.add_frame("look-up", copy_from=0, duration_ms=180)
+look_up.shift_layers(["head", "face"], 0, -1)
+
+motion.tag("reaction", 0, len(motion.frames) - 1, direction="pingpong")
+motion.export_apng("out/fox-reaction.png", tag="reaction", scale=6)
+motion.export_sheet("out/fox-reaction-sheet.png", columns=5, padding=2, extrude=1)
 ```
 
 Tags use inclusive frame indices and support `forward`, `reverse`, and
@@ -280,9 +380,9 @@ Tags use inclusive frame indices and support `forward`, `reverse`, and
 Transforms operate on a layer in one frame:
 
 ```python
-pose = robot.copy(name="bolt-squash")
-pose.layer("body").stretch(region=(8, 15, 23, 30), dy=-2, anchor="bottom")
-pose.export_png("out/bolt-squash.png")
+pose = fox.copy(name="fox-squash")
+pose.layer("body").stretch(region=(10, 22, 27, 33), dy=-1, anchor="bottom")
+pose.export_png("out/fox-squash.png")
 ```
 
 `shift` supports selected keys, a region, wrapping, and transparent overwrite.
@@ -296,21 +396,17 @@ nearest-neighbor sampling and preserves the region's border pixels.
 Select named layers in one frame with `frame.shift_layers(names, dx, dy)`:
 
 ```python
-from examples.courier import build_courier
-
-courier = build_courier()
-# Its "up" pose was made with this single operation:
-pose = courier.add_frame("higher", copy_from=0, duration_ms=140)
-pose.shift_layers(["head", "body", "bag"], 0, -2)
-assert pose.get_layer("feet").rows() == courier.get_layer("feet").rows()
+movement = build_fox()
+pose = movement.add_frame("higher", copy_from=0, duration_ms=180)
+pose.shift_layers(["body", "head", "face", "scarf"], 0, -1)
+assert pose.get_layer("feet").rows() == movement.get_layer("feet").rows()
 # Each part is still an ordinary, independently editable layer.
-pose.get_layer("bag").pixel(24, 20, "h")
+pose.get_layer("scarf").pixel(15, 23, "p")
 ```
 
-Run `python examples/courier.py` and open `out/courier/courier-bounce.gif`, or
-watch it with `python -m pixaas.preview examples/courier.py --sprite courier`.
-The [complete courier example](examples/courier.py) moves its head, body, and bag
-together while its feet and original frame stay unchanged.
+The [fox's breathing pose](examples/moonlit_market.py) moves these four layers
+together, then redraws the tail and arm and shifts the lantern independently.
+Its feet and shadow remain planted.
 
 For reusable parts, use a shared **character origin**: `(x, y)` is the top-left
 of the character's bounding box, and every part adds its own local offsets.
@@ -322,9 +418,8 @@ names are moved once, an empty selection does nothing, and the return value
 sums the individual affected-pixel counts. It affects only the selected frame.
 Pixels leaving the canvas are discarded; `wrap=True` wraps each layer around
 the entire canvas. Layers keep their names, stacking order, and editability.
-This helper is sufficient for the complete courier example; persistent component
-objects, nested groups, and transform hierarchies are deferred until examples
-need capabilities that ordinary drawing functions and explicit selections lack.
+Ordinary drawing functions and explicit layer selections keep these parts
+reusable without requiring a separate component hierarchy.
 
 ## Render and export
 
@@ -345,15 +440,35 @@ a solid color. GIF has palette and transparency limits; use APNG for full RGBA.
 Sheets contain the source frames once, with playback directions in their tag
 metadata.
 
-```python
-image = robot.render(frame="up", scale=8, background="#243342")
-assert image.size == (256, 256)
+GIF export preserves exact visible RGB colors when a frame uses at most 255
+colors, reserving one index for transparency. Larger palettes are quantized.
+GIF treats alpha below 128 as transparent and the rest as opaque, and its timing
+uses 10 ms units. Use APNG when partial transparency or finer timing matters.
 
-robot.save("out/bolt.sprite.json")
-restored = Sprite.load("out/bolt.sprite.json")
+For game textures, `sprite.export_sheet(path, columns=4, padding=2, extrude=1)`
+duplicates each frame's outer texels into a border. JSON frame rectangles exclude
+that border, so importers still select the original content. `extrude` and
+`padding` are measured in **output pixels**, independent of `scale`; padding
+remains transparent between bordered cells and around the sheet. Both default
+to zero. Use nonnegative integers for them, and positive integers for `scale`
+and `columns` (or `columns=None` for one row). Invalid geometry fails before
+writing either output.
+
+Extrusion helps prevent neighboring texels from bleeding into a frame under
+texture filtering. It duplicates transparent edges too; it does not remove
+transparent margins, generate mipmaps, or configure your engine's sampler.
+
+```python
+from pixaac import Sprite
+
+image = fox.render(frame="breathe-in", scale=6, background="#243342")
+assert image.size == (240, 240)
+
+fox.save("out/fox.sprite.json")
+restored = Sprite.load("out/fox.sprite.json")
 ```
 
-`Sprite.from_png("out/bolt-sheet.png")` restores frame rectangles, names,
+`Sprite.from_png("out/fox-sheet.png")` restores frame rectangles, names,
 durations, tags, and palette when the adjacent sheet JSON is present. A flattened
 image cannot recover separate drawing layers. Without metadata, supply
 `frame_width` and `frame_height` to slice a sheet, or import a single PNG.
@@ -370,13 +485,33 @@ image cannot recover separate drawing layers. Without metadata, supply
 
 ## Inspect and verify
 
+The [Tideglass Station example](examples/tideglass.py) exercises scene
+composition and a complete animated asset delivery:
+
+```bash
+uv run python examples/tideglass.py
+uv run python -m pixaac.preview examples/tideglass.py --sprite station
+```
+
+`out/tideglass/` contains native PNGs, enlarged previews, GIF/APNG animations,
+extruded sheets with JSON, editable snapshots, and `review.png` / `poses.png`
+inspection boards. The [feedback log](docs/tideglass-feedback.md) records the
+art and SDK changes discovered while making these assets, along with validation
+and outstanding release gates.
+
+![Tideglass Station animation](docs/images/tideglass-motion.gif)
+
+The [release procedure](docs/releasing.md) includes isolated-wheel verification
+and repeatable browser checks. Integration checks for a particular game engine
+are optional until you choose a project that will consume the assets.
+
 Inspect the pixels directly or work with the rendered image:
 
 ```python
-print(robot.inspect(frame=0, layer="head"))
-print(head.bounds())
-assert robot.validate() == []
-assert robot.render().getpixel((0, 0))[3] == 0
+print(fox.inspect(frame=0, layer="head"))
+print(fox.get_layer("head").bounds())
+assert fox.validate() == []
+assert fox.render().getpixel((0, 0))[3] == 0
 ```
 
 `layer.rows()` returns palette-key strings; `layer.histogram()` counts their
@@ -386,6 +521,15 @@ consistent document.
 For procedural art, own randomness explicitly with a seeded Python
 `random.Random`. Identical drawing inputs produce identical pixels. Pin your
 Python and dependency versions when reproducible encoded files also matter.
+
+To regenerate the Moonlit Market images shown at the top of this README:
+
+```bash
+python -m scripts.build_readme_art
+```
+
+This uses the same asset factories as `examples/moonlit_market.py` and writes
+only the four showcase images under `docs/images/`.
 
 ## Project layout
 

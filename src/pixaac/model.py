@@ -503,7 +503,7 @@ class Sprite:
 
     def to_json(self) -> dict:
         return {
-            "format": "pixaas",
+            "format": "pixaac",
             "version": FORMAT_VERSION,
             "name": self.name,
             "width": self.width,
@@ -516,8 +516,8 @@ class Sprite:
 
     @classmethod
     def from_json(cls, data: dict) -> "Sprite":
-        if data.get("format") not in (None, "pixaas", "agentsprite"):
-            raise SpriteError("not a pixaas document")
+        if data.get("format") not in (None, "pixaac", "pixaas", "agentsprite"):
+            raise SpriteError("not a pixaac document")
         w, h = int(data["width"]), int(data["height"])
         s = cls(
             name=data.get("name", "sprite"),

@@ -1,120 +1,225 @@
-# PixaaS improvement action items
+# PixaaC improvement action items
 
-Based on a hands-on trial creating a 32×32 frog courier, animating a bounce and
-blink, generating a palette variant, and exporting and reimporting assets.
+## Connected browser feedback — 2026-09-14
 
-The trial confirmed that PNG export, GIF/APNG animation timing, editable snapshot
-round trips, and full sprite-sheet pixel round trips worked for this asset.
-Preserve those behaviors while improving export correctness and authoring speed.
+Browser-use MCP is now connected. See [browser findings](docs/browser-feedback.md).
 
-## P0 — Fix tagged sprite-sheet exports
+- [x] Verify printed URL selection, basic playback, comparison, and pixel/grid
+  coordinates at every zoom in a real browser.
+- [x] Reproduce 40 px document overflow in comparison mode at a 390 px viewport.
+- [x] Fix narrow-screen comparison layout and selector overflow.
+- [x] Remove the missing-favicon request from a normal preview load.
+- [x] Verify one-shot/reverse/pingpong/single-frame overlays, imported-source
+  refresh, last-good-image retention on errors, and recovery in the browser.
+- [x] Repeat visual checks and record the completed release gates.
 
-Two problems were reproduced:
+The browser-use pass verified Chrome 152 at widths from 320 to 1280 px. All
+140 regression tests pass. The repeatable
+[browser check](scripts/verify_preview_browser.js) covers the Tideglass UI; the
+[feedback log](docs/browser-feedback.md) records the additional Moonlit Market
+and source-rebuild checks. Hosted CI and target-engine review remain separate.
 
-- Exporting a tag covering source frames `1..2` creates a two-frame sheet whose
-  JSON tag still references `1..2`. In an Aseprite-style frame array, the exported
-  positions are `0..1`.
-- Exporting a reverse tag and importing the resulting sheet loses the tag.
-  Attempting to export that imported animation raises
-  `SpriteError: no tag named 'reverse-reaction'`.
+## Tideglass feedback loop — 2026-09-14
 
-Relevant code: `build_sheet()` and `import_png()` in `src/pixaas/render.py`.
+See [the trial evidence](docs/tideglass-feedback.md) and
+[reproducible artwork](examples/tideglass.py). This round builds on the existing
+uncommitted Moonlit Market and preview work.
 
-- [x] Define tag ranges against positions in the exported frame array.
-- [x] Pack selected frames in source order and express playback order through
-  tag direction metadata.
-- [x] Keep original source indices as separate metadata if useful; make the
-  importer distinguish them from exported array positions.
-- [x] Preserve names, durations, direction, and loop behavior through tagged
-  sheet export/import.
-- [x] Maintain import compatibility with existing PixaaS sheets that use source
-  indices for tag endpoints.
-- [x] Add focused regression coverage for nonzero-start ranges, forward,
-  reverse, pingpong, single-frame, and one-shot tags.
+- [x] Create and visually inspect a new animated coastal asset set at native and
+  enlarged resolution.
+- [x] Reproduce palette collisions in grid-based scene composition.
+- [x] Add palette-safe `Layer.blit` with explicit remapping, clipping, transparent
+  overwrite, and atomic failure behavior.
+- [x] Use it in the scene and verify the storm beacon retains its light colors.
+- [x] Refine illumination, water clusters, and foreground depth; inspect all poses.
+- [x] Reproduce acceptance of negative sheet padding and fractional columns.
+- [x] Validate sheet geometry and add opt-in edge extrusion for texture sampling.
+- [x] Verify exported content rectangles, gutters, scale, animation metadata,
+  transparency, reproducibility, and snapshot/sheet round trips.
+- [x] Detect GIF quantization merging nearby colors in a 21-color scene.
+- [x] Preserve exact GIF colors whenever the frame fits in its visible palette.
+- [x] Build and smoke-test the installed distribution, including preview resources.
+- [x] Add continuous checks for Python 3.12–3.14, Node controller tests, and the
+  installed wheel. The workflow is added; hosted CI has not yet run.
+- [x] Complete visible preview interaction checks in a connected browser.
 
-**Acceptance criteria:** Every exported tag addresses valid exported frame
-positions. Export → import → animation export preserves the intended frame
-sequence and timing. Reverse tags survive the round trip. Existing full-sheet
-round trips continue to work.
+Production readiness requires passing the checks above and visual acceptance
+for the target game's style. A green unit suite alone does not establish either.
 
-## P1 — Shorten the visual iteration loop
+Verification: **140 tests passed** on Python 3.12.9 with Node 22.14.0. Source and
+wheel distributions built; the isolated wheel passed authoring/export, preview
+worker, HTTP, and resource checks. Native and enlarged art, all poses, and an
+opaque extrusion fixture were visually inspected. See the
+[review board](docs/images/tideglass-review.png),
+[pose board](docs/images/tideglass-poses.png), and
+[release procedure](docs/releasing.md). The subsequent browser-use pass above
+closed the browser verification gap.
 
-During the trial, checking proportions required exporting and opening images.
-A local preview should keep the Python script as the source of truth.
+Updated after the [Moonlit Market trial](docs/moonlit-market-feedback.md):
+two 40×40 fox variants, three 24×24 potion icons, and a 96×64 animated shop.
+The reproducible authoring script is [examples/moonlit_market.py](examples/moonlit_market.py).
 
-- [x] Add a documented watch command that reruns an authoring script and refreshes
-  a preview when the script or its local art modules change.
-- [x] Provide nearest-neighbor zoom and a transparency checkerboard.
-- [x] Add play/pause, frame stepping, frame names, and duration display.
-- [x] Show script errors while retaining the last successful preview.
-- [x] Document how scripts expose preview assets and how to select among
-  multiple sprites.
-- [x] Keep preview tooling optional so ordinary scripts and build jobs remain
-  lightweight.
+The previous checklist is complete. This next round targets one confirmed
+preview bug and the effort required to refine artwork. Coordinate inspection,
+onion-skinning, and comparison views are proposed usability improvements;
+the trial did not establish them as correctness defects.
 
-**Acceptance criteria:** After starting preview once, a user can change a shape,
-palette, or frame duration and inspect the result without manually reopening an
-image. A script error is visible, and correcting it resumes updates.
+Implementation update (2026-09-14): the URL fix, inspection controls, onion
+skins, comparison mode, and example refinements are implemented. The full suite
+passes, including the Node controller regressions. Native and enlarged artwork
+was regenerated and visually inspected. The browser runtime initially reported
+no available browsers; the subsequent browser-use pass completed verification. See the
+[refinement and verification notes](docs/moonlit-market-refinement.md).
 
-## P1 — Expose layer management in the public SDK
+## Preserve the working baseline
 
-The underlying model supports several layer-management operations that the
-public `Sprite`/`Frame`/`Layer` API does not expose.
+The trial verified full sheet and snapshot round trips for all six assets,
+including rendered pixels, frame names, and durations. Snapshots retained layer
+names and order. Nonzero-start forward, reverse, and pingpong one-shot tags
+preserved decoded GIF/APNG pixels, timing, and loop metadata through reimport.
+Watcher backend checks confirmed imported-module updates, retention of the last
+successful assets on errors, and recovery after correction.
 
-- [x] Add a public way to list layers in stacking order.
-- [x] Expose layer reordering, renaming, and removal.
-- [x] Define and document how those operations affect every frame.
-- [x] Define how existing `Layer` handles behave after a rename or removal.
-- [x] Offer strict layer lookup alongside get-or-create behavior, so a typo
-  during editing can raise an actionable error.
-- [x] Add a README example that moves a foreground accessory behind a character.
+Keep existing export regression coverage, public layer management, grouped
+movement, and the optional lightweight preview intact. Python remains the source
+of truth; preview overlays must not change sprite pixels or exported files.
 
-**Acceptance criteria:** A script can inspect and change stacking order without
-accessing private data or saving and reloading a snapshot. Structural operations
-keep frames consistent, and stale handles fail clearly or remain valid according
-to the documented contract.
+Browser interaction was unavailable during the initial trial. The subsequent
+browser-use pass verified play/pause, stepping, checkerboard rendering, and
+visible refresh/error behavior.
 
-## P2 — Make related parts easier to move together
+## P0 — Fix the preview URL printed with `--sprite`
 
-The frog's bounce required separate shifts for its head, body, and bag. Start
-with a small abstraction that works with ordinary Python drawing functions.
+The documented command
 
-- [x] Design a lightweight way to select named layers and apply a shared shift
-  within one frame.
-- [x] Document a common origin convention for reusable drawing functions.
-- [x] Add an example with an accessory that follows a character's movement.
-- [x] Specify clipping and wrapping behavior for grouped shifts.
-- [x] Evaluate a richer component/group API only after the smaller helper has
-  been exercised in examples.
+```sh
+python -m pixaac.preview examples/moonlit_market.py --sprite fox
+```
 
-**Acceptance criteria:** The example moves the head, body, and accessory together
-with one public operation while leaving the feet and other frames unchanged.
-Individual layers remain independently editable.
+prints `http://127.0.0.1:8765/?sprite=fox`. Requests with this query-string
+format return **404**, while `/` and `/state` return **200**.
+`make_server()` compares the complete request target with `/`, including the
+query string that the CLI appends.
 
-## P2 — Make the README demonstrate the value immediately
+Relevant code: `make_server()` and `main()` in `src/pixaac/preview.py`;
+initial asset selection in `src/pixaac/preview.html`.
 
-- [x] Place a rendered sprite, an animation, and palette variants near the top.
-- [x] Put a short runnable authoring example beside those results.
-- [x] Explain the practical benefit: edit a shared function or palette and
-  regenerate a consistent family of assets.
-- [x] Include a clear path from installation to the first visible output.
-- [x] Add a troubleshooting note for layer order, clipped outlines, and blank
-  frames created without `copy_from`.
-- [x] Ensure showcased assets are reproducible from checked-in scripts.
+- [x] Route requests using the parsed URL path, retaining query parameters for
+  client-side sprite selection.
+- [x] Add a focused HTTP regression check for the URL format printed by the CLI,
+  including an asset name requiring URL encoding.
+- [x] Confirm unknown paths still return 404.
+- [x] Open the printed URL in a browser and verify the requested asset is
+  selected; verify a missing asset name produces the documented fallback.
 
-**Acceptance criteria:** A new reader can see what PixaaS produces before reading
-the detailed API guide and can reproduce a showcased asset using documented
-commands.
+**Acceptance criteria:** The exact printed URL loads successfully and selects
+`fox` without manual URL editing. The README's `--sprite` example works.
+
+## P1 — Add cursor coordinates and an optional pixel grid
+
+Refining the fox's face required inspecting a render and translating the desired
+change back into source coordinates. The preview should make that translation
+direct.
+
+Relevant code: `src/pixaac/preview.html`.
+
+- [x] Display native pixel `(x, y)` coordinates under the pointer, with `(0, 0)`
+  at the top left.
+- [x] Keep coordinate mapping correct at every supported zoom and after
+  scrolling the preview; clear the readout outside the image.
+- [x] Add a toggleable pixel grid that aligns with native pixel boundaries
+  without obscuring the artwork.
+- [x] Preserve zoom and grid choices across successful rebuilds.
+- [x] Document the controls.
+- [x] Verify coordinate mapping in the browser at image corners,
+  after scrolling, and after switching between differently sized assets.
+
+**Acceptance criteria:** A user can identify a fox eye pixel at multiple zoom
+levels, change that coordinate in Python, and see the intended pixel update.
+Grid lines stay aligned, and exported PNGs contain no preview overlays.
+
+## P1 — Add onion-skinning for pose refinement
+
+The fox's breathing motion and blink are easy to generate but harder to compare
+one frame at a time. Adjacent-pose overlays should reveal alignment and motion.
+
+Relevant code: `src/pixaac/preview.html`; preview serialization in
+`src/pixaac/preview.py` only if additional data is needed.
+
+- [x] Add independently toggleable previous/next pose overlays with distinct
+  tints and adjustable opacity.
+- [x] Define neighbors by the selected tag's playback sequence, including
+  reverse and pingpong order.
+- [x] Wrap neighbors only for looping playback; omit unavailable neighbors at
+  one-shot boundaries and avoid redundant overlays for single-frame assets.
+- [x] Keep overlays aligned at every zoom and update them when stepping,
+  changing tags, switching assets, or rebuilding.
+- [x] Document whether overlays appear during playback (they remain visible).
+- [x] Verify overlay rendering and playback behavior in the browser.
+
+**Acceptance criteria:** While stepping through the fox animation, a user can
+distinguish the stationary feet from the moving head and lantern. Reverse,
+pingpong, one-shot, and single-frame selections show the expected neighbors.
+Turning overlays off restores the ordinary preview.
+
+## P2 — Compare variants and poses side by side
+
+Palette variants were the clearest productivity gain in the trial. Comparing
+them currently requires switching the selected asset or creating a separate
+contact sheet.
+
+- [x] Add an optional second preview pane with independent asset and frame
+  selection.
+- [x] Use a shared zoom and consistent canvas alignment so differences in color
+  and silhouette are easy to judge.
+- [x] Label each pane with its asset, frame name, and duration.
+- [x] Refresh both panes after a successful rebuild while retaining valid
+  selections; handle a removed asset or frame without stale content.
+- [x] Keep the single-pane workflow as the default and document comparison mode.
+
+**Acceptance criteria:** A user can compare fox and arctic palettes, then two
+poses of the same fox, without exporting a contact sheet. Both panes update
+after source changes, including when the selected assets have different sizes
+or frame counts.
+
+## P2 — Improve the example's palette roles and visual polish
+
+The art is useful for prototyping, but the scene is geometric and the animation
+mostly translates parts by one pixel. These are authoring limitations. The
+arctic palette also changes lantern light because fur and light share keys.
+
+Relevant code: `examples/moonlit_market.py`.
+
+- [x] Separate fur and lantern-light palette keys so recoloring the character
+  can preserve its accessory's lighting.
+- [x] Document the distinction between material roles and shared color values
+  in the palette example.
+- [x] Refine the fox animation with a deliberate pose change beyond a shared
+  shift, using ordinary drawing functions and independently editable layers.
+- [x] Give the shop a focused detail and lighting pass, checking readability at
+  native resolution as well as enlarged.
+- [x] Regenerate previews and document the arctic lantern's before/after pixel
+  color at `(5, 31)`, with a walkthrough for the new inspection controls.
+- [x] Complete that inspection walkthrough in a connected browser.
+
+**Acceptance criteria:** Fox variants retain the intended lantern colors, and
+all six assets remain reproducible from the script. A visual review confirms
+that the revised motion and scene details read at native size; export and
+snapshot round trips continue to preserve the assets.
 
 ## Suggested delivery order
 
-1. Fix tagged exports and add regression coverage.
-2. Improve README examples and visual evidence.
-3. Expose layer management.
-4. Deliver a minimal watching preview, then animation controls.
-5. Add grouped movement after validating the API with a complete example.
+1. Fix the printed preview URL and verify the existing controls in a browser.
+2. Add coordinate inspection and the pixel grid.
+3. Add onion-skinning and exercise it on the fox poses.
+4. Add side-by-side comparison for palettes and poses.
+5. Refine the example using those controls and record any remaining friction.
 
-The hands-on reproduction script and generated outputs are under
-`out/pixaas-feedback/` in the trial workspace. That directory is generated output;
-move durable regression cases into `tests/` and reusable demonstrations into
-`examples/` as the items are implemented.
+For preview changes, verify play/pause, frame stepping, nearest-neighbor zoom,
+transparency, imported-module refresh, visible errors, and recovery in a browser.
+Keep focused regression cases in `tests/`; the scratch trial checks under
+`out/moonlit-market/` are evidence, not durable test coverage.
+
+Defer persistent component objects, nested groups, and transform hierarchies
+until a concrete example needs them. Ordinary functions and `shift_layers()`
+were sufficient for this trial.

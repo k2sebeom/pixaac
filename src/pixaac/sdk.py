@@ -81,6 +81,60 @@ class Layer:
         """Paste palette-key rows; transparent cells are skipped by default."""
         return ops.paste(self._data, self._palette, grid, x, y, not overwrite)
 
+    def blit(
+        self, source: Layer, *, x: int = 0, y: int = 0,
+        mapping: Mapping[str, str] | None = None, overwrite: bool = False,
+    ) -> int:
+        """Copy a layer's pixels, clipping to this surface, without sharing state.
+
+        Missing palette keys are imported. Conflicting colors require explicit
+        source-to-destination key mapping; an existing mapped key deliberately
+        uses the destination color. Transparent pixels skip unless overwrite is
+        true. Visibility and opacity are layer properties and are not copied.
+        Validation finishes before any palette or pixel changes, including when
+        source is this layer. Returns the number of destination pixels written.
+        """
+        if not isinstance(source, Layer):
+            raise SpriteError("source must be a Layer")
+        if any(type(value) is not int for value in (x, y)):
+            raise SpriteError("blit coordinates must be integers")
+        destination, source_data = self._data, source._data
+        remap = dict(mapping) if mapping is not None else {}
+        for old, new in remap.items():
+            if not source._palette.has(old):
+                raise SpriteError(f"unknown source palette key {old!r}")
+            if not isinstance(new, str) or len(new) != 1 or new.isspace():
+                raise SpriteError(f"destination palette key must be one non-space character: {new!r}")
+            if old == "." and new != ".":
+                raise SpriteError("the transparent key '.' cannot be remapped")
+        palette = deepcopy(self._palette)
+        resolved: dict[str, str] = {}
+        writes: list[tuple[int, int, str]] = []
+        # Snapshot pending writes first so overlapping self-copy cannot smear.
+        for sy in range(max(0, -y), min(source_data.height, destination.height - y)):
+            for sx in range(max(0, -x), min(source_data.width, destination.width - x)):
+                old = source_data.grid[sy][sx]
+                if old not in resolved:
+                    new = remap.get(old, old)
+                    color = source._palette.rgba(old)
+                    if color is None or color[3] == 0:
+                        new = "."
+                    elif not palette.has(new):
+                        palette.set(new, source._palette.colors[old])
+                    elif old not in remap and palette.rgba(new) != color:
+                        raise SpriteError(
+                            f"palette conflict for key {old!r}; supply mapping="
+                            f"{{{old!r}: 'unused key'}} or map to a destination color"
+                        )
+                    resolved[old] = new
+                new = resolved[old]
+                if overwrite or not palette.is_transparent(new):
+                    writes.append((sx + x, sy + y, new))
+        self._palette.colors.update(palette.colors)
+        for dx, dy, key in writes:
+            destination.set(dx, dy, key)
+        return len(writes)
+
     def set_grid(self, grid: str) -> int:
         return ops.set_grid(self._data, self._palette, grid)
 
@@ -296,9 +350,11 @@ class Sprite:
 
     def export_sheet(
         self, path: str | Path, *, columns: int | None = None, padding: int = 0,
-        scale: int = 1, tag: str | None = None,
+        scale: int = 1, tag: str | None = None, extrude: int = 0,
     ) -> tuple[Path, Path | None]:
-        return render.export_sheet(self._data, path, columns, padding, scale, tag)
+        return render.export_sheet(
+            self._data, path, columns, padding, scale, tag, extrude=extrude
+        )
 
     def export_gif(
         self, path: str | Path, *, scale: int = 1,

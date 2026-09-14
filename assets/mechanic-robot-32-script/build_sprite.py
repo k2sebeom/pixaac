@@ -3,8 +3,8 @@ from pathlib import Path
 from time import perf_counter
 
 from PIL import Image, ImageDraw
-from pixaas import api
-from pixaas.model import Sprite
+from pixaac import api
+from pixaac.model import Sprite
 
 ROOT = Path(__file__).resolve().parent
 PATH = ROOT / "mechanic-robot-32-script.sprite.json"

@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 
-from pixaas import Layer, Sprite
+from pixaac import Layer, Sprite
 
 
 PALETTE = {

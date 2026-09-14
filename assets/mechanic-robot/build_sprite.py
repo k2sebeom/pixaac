@@ -1,7 +1,7 @@
 """Build BOLT with palette-key grids through the AgentSprite Python API."""
 from pathlib import Path
 from PIL import Image, ImageDraw
-from pixaas import api
+from pixaac import api
 
 ROOT = Path(__file__).resolve().parent
 SPRITE = ROOT / "mechanic-robot.sprite.json"
@@ -28,7 +28,7 @@ COLORS = {
 if not SPRITE.exists():
     api.new(SPRITE, 128, 128, name="BOLT — workshop mechanic", layer="legs")
 api.palette_set_many(SPRITE, COLORS)
-from pixaas.model import Sprite
+from pixaac.model import Sprite
 existing = [layer.name for layer in Sprite.load(SPRITE).frames[0].layers]
 
 

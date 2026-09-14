@@ -14,3 +14,4 @@ wheels/
 
 # Generated art builds
 out/
+.playwright-mcp/
