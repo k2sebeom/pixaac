@@ -59,7 +59,7 @@ def collect_assets(script: Path) -> dict:
     return result
 
 
-IGNORED = {".git", ".venv", "venv", "__pycache__", "node_modules", "out", "build", "dist"}
+IGNORED = {".git", ".venv", "venv", "__pycache__", "node_modules", "out", "generated", "build", "dist"}
 
 
 def fingerprints(roots: tuple[Path, ...]) -> dict[str, tuple[int, int]]:

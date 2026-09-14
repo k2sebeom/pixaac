@@ -5,7 +5,7 @@ from pixaac import Sprite
 
 
 def assets():
-    script = Path(__file__).resolve().parents[1] / "examples" / "moonlit_market.py"
+    script = Path(__file__).resolve().parents[1] / "assets" / "moonlit_market" / "build.py"
     return runpy.run_path(str(script))["preview_assets"]()
 
 

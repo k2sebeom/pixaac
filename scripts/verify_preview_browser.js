@@ -1,6 +1,6 @@
 // Pass this file's absolute path as `filename` to browser-use's
 // browser_run_code_unsafe tool. It evaluates this function with its Page.
-// Requires examples/tideglass.py to be running in the preview server.
+// Requires assets/tideglass/build.py to be running in the preview server.
 async (page, url = "http://127.0.0.1:8876/?sprite=station") => {
   const passed = [];
   const assert = (condition, message) => {

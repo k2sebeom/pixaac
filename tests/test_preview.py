@@ -102,8 +102,8 @@ def test_watch_tracks_added_and_deleted_sources_but_ignores_outputs(tmp_path):
     assert fingerprints((tmp_path,)) != before
     source.unlink()
     assert fingerprints((tmp_path,)) == before
-    for directory in (".venv", "out", "__pycache__"):
-        (tmp_path / directory).mkdir()
+    for directory in (".venv", "out", "__pycache__", "assets/moonlit_market/generated"):
+        (tmp_path / directory).mkdir(parents=True)
         (tmp_path / directory / "ignored.py").write_text("pass")
     assert fingerprints((tmp_path,)) == before
 

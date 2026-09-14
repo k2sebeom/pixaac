@@ -1,19 +1,19 @@
 # Moonlit Market refinement
 
-The [authoring script](../examples/moonlit_market.py) still produces six assets:
+The [authoring script](../assets/moonlit_market/build.py) still produces six assets:
 two fox palettes, three potions, and the animated shop. Run:
 
 ```sh
-python examples/moonlit_market.py
-python -m pixaac.preview examples/moonlit_market.py --sprite fox
+python assets/moonlit_market/build.py
+python -m pixaac.preview assets/moonlit_market/build.py --sprite fox
 ```
 
 The build regenerates native and enlarged PNGs, sheets, editable snapshots,
 GIF/APNG animations, a contact sheet, and `pose-review.png` under
-`out/moonlit-market/`. The preview command prints a working, URL-encoded asset
+`assets/moonlit_market/generated/`. The preview command prints a working, URL-encoded asset
 selection link.
 
-![Revised Moonlit Market assets](images/moonlit-market.png)
+![Revised Moonlit Market assets](../assets/moonlit_market/showcase/contact-sheet.png)
 
 ## Palette roles
 
@@ -58,7 +58,7 @@ The shop adds warm pools and broken reflections leading to the doorway,
 small bottles on the window shelves, timber seams, worn roof edges, and a
 bright doorstep. These details have separate layers where useful.
 
-![Native and enlarged pose and shop review](images/moonlit-poses.png)
+![Native and enlarged pose and shop review](../assets/moonlit_market/showcase/pose-review.png)
 
 The regenerated static review was inspected at native resolution and 4×:
 the curled tail changes the outline, the feet stay planted, and the window

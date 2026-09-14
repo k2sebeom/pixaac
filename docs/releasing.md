@@ -8,7 +8,7 @@ uv run pytest -q
 uv build
 uv run --isolated --no-project --with dist/pixaac-0.1.0-py3-none-any.whl \
   python -I scripts/smoke_installed.py
-uv run python examples/tideglass.py
+uv run python assets/tideglass/build.py
 ```
 
 Use the current version's wheel path if the package version changes. The smoke
@@ -20,10 +20,10 @@ The `Checks` workflow runs the suite and installed-wheel smoke check on Python
 3.12, 3.13, and 3.14 with Node 22. A locally passing run is not evidence that
 the hosted matrix passed; check its results before releasing.
 
-Inspect `out/tideglass/review.png` and `poses.png`, then run:
+Inspect `assets/tideglass/generated/review.png` and `poses.png`, then run:
 
 ```sh
-uv run python -m pixaac.preview examples/tideglass.py --sprite station
+uv run python -m pixaac.preview assets/tideglass/build.py --sprite station
 ```
 
 In a connected browser:

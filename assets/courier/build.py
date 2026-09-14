@@ -1,4 +1,4 @@
-"""A frog courier with planted feet: python examples/courier.py [output-directory].
+"""A frog courier with planted feet: python assets/courier/build.py [output-directory].
 
 Every drawing function uses (x, y) as the top-left of the whole character's
 32×32 bounding box. Parts share that origin and keep their own local offsets.
@@ -73,4 +73,4 @@ def build(output: Path) -> None:
 
 
 if __name__ == "__main__":
-    build(Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out/courier"))
+    build(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "generated")

@@ -113,7 +113,7 @@ def test_exports_and_import_preserve_pixels_and_timing(tmp_path):
 
 @pytest.mark.parametrize("format_name", [None, "agentsprite", "pixaas", "pixaac"])
 def test_legacy_documents_still_load(tmp_path, format_name):
-    data = json.loads((ROOT / "examples/hero.sprite.json").read_text())
+    data = json.loads((ROOT / "assets/fixtures/hero.sprite.json").read_text())
     data["format"] = format_name
     path = tmp_path / "legacy.sprite.json"
     path.write_text(json.dumps(data))
@@ -155,13 +155,13 @@ def test_readme_python_examples(tmp_path, monkeypatch):
     namespace = {}
     for index, code in enumerate(blocks):
         exec(compile(code, f"README.md:python-block-{index + 1}", "exec"), namespace)
-    assert namespace["robot"].validate() == []
-    assert (tmp_path / "out/bolt.png").exists()
-    assert (tmp_path / "out/bolt-sheet.json").exists()
+    assert namespace["fox"].validate() == []
+    assert (tmp_path / "assets/generated/fox.png").exists()
+    assert (tmp_path / "assets/generated/fox-sheet.json").exists()
 
 
 def test_robot_example(tmp_path):
-    example = runpy.run_path(str(ROOT / "examples/robot.py"))
+    example = runpy.run_path(str(ROOT / "assets/robot/build.py"))
     example["build"](tmp_path)
     sprite = Sprite.load(tmp_path / "bolt.sprite.json")
     assert (sprite.width, sprite.height) == (32, 32)
@@ -231,7 +231,7 @@ def test_shift_layers_clipping_wrapping_and_atomic_lookup(wrap):
 
 
 def test_courier_example_moves_parts_together(tmp_path):
-    example = runpy.run_path(str(ROOT / "examples/courier.py"))
+    example = runpy.run_path(str(ROOT / "assets/courier/build.py"))
     example["build"](tmp_path)
     sprite = Sprite.load(tmp_path / "courier.sprite.json")
     pose = sprite.frame("up")

@@ -7,7 +7,7 @@ from pixaac import Sprite
 
 
 def trial():
-    script = Path(__file__).resolve().parents[1] / "examples" / "tideglass.py"
+    script = Path(__file__).resolve().parents[1] / "assets" / "tideglass" / "build.py"
     return runpy.run_path(str(script))
 
 

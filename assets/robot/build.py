@@ -1,4 +1,4 @@
-"""Build BOLT and an idle animation: python examples/robot.py [output-directory]."""
+"""Build BOLT and an idle animation: python assets/robot/build.py [output-directory]."""
 from pathlib import Path
 import sys
 
@@ -113,4 +113,4 @@ def build(output: Path) -> None:
 
 
 if __name__ == "__main__":
-    build(Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out"))
+    build(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "generated")

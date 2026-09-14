@@ -14,7 +14,7 @@ an established design cheap, but does not make discovering a good design cheap.
 
 ## What I made
 
-Run `.venv/bin/python examples/moonlit_market.py` from this checkout, or use
+Run `.venv/bin/python assets/moonlit_market/build.py` from this checkout, or use
 `python` after installing PixaaC in your environment.
 
 - A 40×40 lantern fox, with four breathing/blinking poses.
@@ -25,7 +25,7 @@ Run `.venv/bin/python examples/moonlit_market.py` from this checkout, or use
 All artwork uses the public PixaaC SDK. Pillow only lays out the contact sheet.
 The script exposes all six assets through `preview_assets()`.
 
-Generated files are in `out/moonlit-market/`: `contact-sheet.png`, native and
+Generated files are in `assets/moonlit_market/generated/`: `contact-sheet.png`, native and
 enlarged PNGs, GIF/APNG animations, sheets with JSON, and editable snapshots.
 The output folder is ignored by Git; rerun the example to regenerate the art.
 
@@ -55,7 +55,7 @@ The output folder is ignored by Git; rerun the example to regenerate the art.
 The documented invocation
 
 ```sh
-python -m pixaac.preview examples/moonlit_market.py --sprite fox
+python -m pixaac.preview assets/moonlit_market/build.py --sprite fox
 ```
 
 prints `http://127.0.0.1:8765/?sprite=fox`.
@@ -106,10 +106,10 @@ The small grouped-shift helper already solved the immediate animation problem.
 
 ## Scope of verification
 
-The trial's scratch reproduction script and machine-readable results are
-`out/moonlit-market/check_trial.py` and `checks.json`. The script checks export
-round trips, watcher recovery, and HTTP responses. It is trial evidence rather
-than a new permanent test suite.
+The trial used a scratch reproduction script and machine-readable results to
+check export round trips, watcher recovery, and HTTP responses. Those temporary
+artifacts were removed during asset consolidation; the findings remain here and
+durable regression coverage is maintained in `tests/`.
 
 I visually inspected the contact sheet and all four fox poses. No browser was
 available through the browser runtime, so I did not verify interactive

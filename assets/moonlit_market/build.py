@@ -1,4 +1,4 @@
-"""Moonlit Market: python examples/moonlit_market.py.
+"""Moonlit Market: python assets/moonlit_market/build.py.
 
 All artwork is drawn with PixaaC. Pillow only arranges the review contact sheet.
 """
@@ -311,4 +311,4 @@ def build(output):
 
 
 if __name__ == "__main__":
-    build(Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out/moonlit-market"))
+    build(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "generated")

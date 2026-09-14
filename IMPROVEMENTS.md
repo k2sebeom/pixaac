@@ -1,5 +1,24 @@
 # PixaaC improvement action items
 
+## Asset consolidation — 2026-09-14
+
+All art now lives under [`assets/`](assets/README.md). Each collection keeps its
+builder, curated `showcase/` images, and ignored `generated/` exports together.
+README imports and commands, documentation images, and test fixtures use the new
+paths. Browser screenshots are in `assets/screenshots/`.
+
+Unreferenced mechanic studies, unused legacy snapshots, superseded robot README
+images, duplicate builds, and scratch trial artifacts have been removed. The
+robot and courier factories and the hero snapshot remain because tests use them.
+The preview watcher ignores `generated/` directories, and a single showcase
+command regenerates the documented Moonlit Market and Tideglass art.
+
+Verification: all 140 tests pass, all 47 documentation links resolve, and the
+11 retained images plus the compatibility fixture are byte-identical to their
+previous versions. Both collection exports and the curated showcase regenerate
+under `assets/`; the retired `examples/`, `out/`, and `docs/images/` directories
+are no longer present.
+
 ## Connected browser feedback — 2026-09-14
 
 Browser-use MCP is now connected. See [browser findings](docs/browser-feedback.md).
@@ -22,7 +41,7 @@ and source-rebuild checks. Hosted CI and target-engine review remain separate.
 ## Tideglass feedback loop — 2026-09-14
 
 See [the trial evidence](docs/tideglass-feedback.md) and
-[reproducible artwork](examples/tideglass.py). This round builds on the existing
+[reproducible artwork](assets/tideglass/build.py). This round builds on the existing
 uncommitted Moonlit Market and preview work.
 
 - [x] Create and visually inspect a new animated coastal asset set at native and
@@ -50,14 +69,14 @@ Verification: **140 tests passed** on Python 3.12.9 with Node 22.14.0. Source an
 wheel distributions built; the isolated wheel passed authoring/export, preview
 worker, HTTP, and resource checks. Native and enlarged art, all poses, and an
 opaque extrusion fixture were visually inspected. See the
-[review board](docs/images/tideglass-review.png),
-[pose board](docs/images/tideglass-poses.png), and
+[review board](assets/tideglass/showcase/review.png),
+[pose board](assets/tideglass/showcase/poses.png), and
 [release procedure](docs/releasing.md). The subsequent browser-use pass above
 closed the browser verification gap.
 
 Updated after the [Moonlit Market trial](docs/moonlit-market-feedback.md):
 two 40×40 fox variants, three 24×24 potion icons, and a 96×64 animated shop.
-The reproducible authoring script is [examples/moonlit_market.py](examples/moonlit_market.py).
+The reproducible authoring script is [assets/moonlit_market/build.py](assets/moonlit_market/build.py).
 
 The previous checklist is complete. This next round targets one confirmed
 preview bug and the effort required to refine artwork. Coordinate inspection,
@@ -93,7 +112,7 @@ visible refresh/error behavior.
 The documented command
 
 ```sh
-python -m pixaac.preview examples/moonlit_market.py --sprite fox
+python -m pixaac.preview assets/moonlit_market/build.py --sprite fox
 ```
 
 prints `http://127.0.0.1:8765/?sprite=fox`. Requests with this query-string
@@ -188,7 +207,7 @@ The art is useful for prototyping, but the scene is geometric and the animation
 mostly translates parts by one pixel. These are authoring limitations. The
 arctic palette also changes lantern light because fur and light share keys.
 
-Relevant code: `examples/moonlit_market.py`.
+Relevant code: `assets/moonlit_market/build.py`.
 
 - [x] Separate fur and lantern-light palette keys so recoloring the character
   can preserve its accessory's lighting.
@@ -217,8 +236,8 @@ snapshot round trips continue to preserve the assets.
 
 For preview changes, verify play/pause, frame stepping, nearest-neighbor zoom,
 transparency, imported-module refresh, visible errors, and recovery in a browser.
-Keep focused regression cases in `tests/`; the scratch trial checks under
-`out/moonlit-market/` are evidence, not durable test coverage.
+Keep focused regression cases in `tests/`; scratch trial artifacts were removed
+during asset consolidation after their findings were recorded in the notes.
 
 Defer persistent component objects, nested groups, and transform hierarchies
 until a concrete example needs them. Ordinary functions and `shift_layers()`

@@ -9,13 +9,13 @@ The script is the source of truth. A sprite is the result of running it.
 Change a palette, adjust a shape, or fix a drawing function, then rebuild every
 asset that uses it.
 
-![Moonlit Market: an animated apothecary beneath a crescent moon](docs/images/moonlit-shop.gif)
+![Moonlit Market: an animated apothecary beneath a crescent moon](assets/moonlit_market/showcase/shop.gif)
 
 | Lantern fox | Arctic palette | Potion variants |
 | --- | --- | --- |
-| ![Fox breathing, blinking, and carrying a lantern](docs/images/moonlit-fox.gif) | ![Arctic fox with the same warm lantern light](docs/images/moonlit-arctic.gif) | ![Mint, rose, and amber potions built from shared geometry](docs/images/moonlit-potions.png) |
+| ![Fox breathing, blinking, and carrying a lantern](assets/moonlit_market/showcase/fox.gif) | ![Arctic fox with the same warm lantern light](assets/moonlit_market/showcase/arctic.gif) | ![Mint, rose, and amber potions built from shared geometry](assets/moonlit_market/showcase/potions.png) |
 
-[Moonlit Market](examples/moonlit_market.py) builds all six assets from Python:
+[Moonlit Market](assets/moonlit_market/build.py) builds all six assets from Python:
 two 40×40 fox variants, three 24×24 potions, and a 96×64 animated shop. The fox
 curls its tail, swings its lantern, and blinks; palette variants share geometry
 while keeping fur and lantern colors independent.
@@ -23,8 +23,8 @@ while keeping fur and lantern colors independent.
 ## Quick start
 
 From a checkout, install with `python -m pip install .`, then run
-`python examples/moonlit_market.py`. Open `out/moonlit-market/contact-sheet.png`
-to see the asset set, or `out/moonlit-market/fox.gif` and `shop.gif` to see the
+`python assets/moonlit_market/build.py`. Open `assets/moonlit_market/generated/contact-sheet.png`
+to see the asset set, or `assets/moonlit_market/generated/fox.gif` and `shop.gif` to see the
 animations. The build also produces native PNGs, APNGs, sprite sheets with JSON,
 and editable snapshots.
 
@@ -32,18 +32,18 @@ Try this from the checkout root (save as `draw_fox.py`, then run
 `python draw_fox.py`):
 
 ```python
-from examples.moonlit_market import build_fox
+from assets.moonlit_market.build import build_fox
 
 fox = build_fox()
-fox.export_png("out/fox.png")
-fox.export_gif("out/fox-idle.gif", tag="idle", scale=6)
-fox.export_sheet("out/fox-sheet.png", columns=4, padding=2, extrude=1)
+fox.export_png("assets/generated/fox.png")
+fox.export_gif("assets/generated/fox-idle.gif", tag="idle", scale=6)
+fox.export_sheet("assets/generated/fox-sheet.png", columns=4, padding=2, extrude=1)
 
 arctic = fox.copy(name="arctic-fox")
 arctic.palette.set("F", "#c9e0dd")  # Fur base; lantern light has its own keys.
 arctic.palette.set("O", "#799cac")
 arctic.palette.set("H", "#e8eac1")
-arctic.export_png("out/arctic-fox.png", scale=6)
+arctic.export_png("assets/generated/arctic-fox.png", scale=6)
 ```
 
 Edit `build_fox()` once to update the silhouette of every variant, or change
@@ -79,7 +79,7 @@ For development:
 
 ```bash
 uv sync
-uv run python examples/moonlit_market.py
+uv run python assets/moonlit_market/build.py
 uv run pytest
 ```
 
@@ -89,8 +89,8 @@ notebooks, build jobs, and agent coding environments.
 ## Watch a live preview
 
 ```bash
-python -m pixaac.preview examples/moonlit_market.py --sprite fox
-# With uv: uv run python -m pixaac.preview examples/moonlit_market.py --sprite fox
+python -m pixaac.preview assets/moonlit_market/build.py --sprite fox
+# With uv: uv run python -m pixaac.preview assets/moonlit_market/build.py --sprite fox
 ```
 
 Open the printed local URL (normally <http://127.0.0.1:8765>) once. Save changes
@@ -131,7 +131,7 @@ and provide a coordinate-based inspection walkthrough.
 Expose a module-level `preview_assets` value or a zero-argument function:
 
 ```python
-from examples.moonlit_market import build_fox
+from assets.moonlit_market.build import build_fox
 
 def preview_assets():
     fox = build_fox()
@@ -141,7 +141,7 @@ def preview_assets():
     return {"fox": fox, "arctic": arctic}  # Or return one Sprite directly.
 ```
 
-The [Moonlit Market script](examples/moonlit_market.py) exposes all six assets.
+The [Moonlit Market script](assets/moonlit_market/build.py) exposes all six assets.
 The watcher executes your script in a fresh Python process on each rebuild,
 with the script's directory on the import path. Its `if __name__ == "__main__":`
 block is skipped, so put batch exports there and expose preview assets outside
@@ -150,7 +150,7 @@ inside the main block too. Preview is for your own authoring scripts.
 
 Python files under the working directory are watched when the script lives
 there; otherwise its containing directory is watched. This includes local art
-modules, new files, and deletions. Generated `out/`, virtual environments, build
+modules, new files, and deletions. `generated/` directories, virtual environments, build
 folders, and hidden directories are skipped. Add other source locations with
 repeatable `--watch ../shared-art` options. Non-Python inputs can be watched by
 passing their individual file paths. `--sprite arctic` selects an initial asset;
@@ -291,7 +291,7 @@ Keep the head, body, tail, lantern, and effects on separate layers when they nee
 move independently. Put shared palettes and drawing functions in regular Python
 modules. Rebuilding an asset set is a loop over those functions.
 
-The [Moonlit Market example](examples/moonlit_market.py) uses reusable stars,
+The [Moonlit Market example](assets/moonlit_market/build.py) uses reusable stars,
 trees, tail poses, and arm poses alongside its fox, potion, and shop factories.
 
 ## Generate variants
@@ -306,7 +306,7 @@ for key, color in {
     "r": "#655986", "p": "#a397bb",
 }.items():
     arctic.palette.set(key, color)
-arctic.export_gif("out/arctic-idle.gif", tag="idle", scale=6)
+arctic.export_gif("assets/generated/arctic-idle.gif", tag="idle", scale=6)
 ```
 
 Use `layer.replace(...)` to change which keys selected pixels use. Use
@@ -334,7 +334,7 @@ have matching RGBA colors. A conflict raises `SpriteError` before changing pixel
 or the palette. Explicit mappings resolve conflicting keys:
 
 ```python
-from examples.moonlit_market import PALETTE, preview_assets
+from assets.moonlit_market.build import PALETTE, preview_assets
 from pixaac import Sprite
 
 assets = preview_assets()
@@ -345,7 +345,7 @@ for name, x, mapping in (
 ):
     for part in assets[name].frame().layers:
         pair.layer(f"{name}/{part.name}").blit(part, x=x, y=2, mapping=mapping)
-pair.export_png("out/fox-pair.png", scale=4)
+pair.export_png("assets/generated/fox-pair.png", scale=4)
 ```
 
 New mapped keys receive the source color. Mapping to an existing key deliberately
@@ -369,8 +369,8 @@ look_up = motion.add_frame("look-up", copy_from=0, duration_ms=180)
 look_up.shift_layers(["head", "face"], 0, -1)
 
 motion.tag("reaction", 0, len(motion.frames) - 1, direction="pingpong")
-motion.export_apng("out/fox-reaction.png", tag="reaction", scale=6)
-motion.export_sheet("out/fox-reaction-sheet.png", columns=5, padding=2, extrude=1)
+motion.export_apng("assets/generated/fox-reaction.png", tag="reaction", scale=6)
+motion.export_sheet("assets/generated/fox-reaction-sheet.png", columns=5, padding=2, extrude=1)
 ```
 
 Tags use inclusive frame indices and support `forward`, `reverse`, and
@@ -382,7 +382,7 @@ Transforms operate on a layer in one frame:
 ```python
 pose = fox.copy(name="fox-squash")
 pose.layer("body").stretch(region=(10, 22, 27, 33), dy=-1, anchor="bottom")
-pose.export_png("out/fox-squash.png")
+pose.export_png("assets/generated/fox-squash.png")
 ```
 
 `shift` supports selected keys, a region, wrapping, and transparent overwrite.
@@ -404,7 +404,7 @@ assert pose.get_layer("feet").rows() == movement.get_layer("feet").rows()
 pose.get_layer("scarf").pixel(15, 23, "p")
 ```
 
-The [fox's breathing pose](examples/moonlit_market.py) moves these four layers
+The [fox's breathing pose](assets/moonlit_market/build.py) moves these four layers
 together, then redraws the tail and arm and shifts the lantern independently.
 Its feet and shadow remain planted.
 
@@ -464,11 +464,11 @@ from pixaac import Sprite
 image = fox.render(frame="breathe-in", scale=6, background="#243342")
 assert image.size == (240, 240)
 
-fox.save("out/fox.sprite.json")
-restored = Sprite.load("out/fox.sprite.json")
+fox.save("assets/generated/fox.sprite.json")
+restored = Sprite.load("assets/generated/fox.sprite.json")
 ```
 
-`Sprite.from_png("out/fox-sheet.png")` restores frame rectangles, names,
+`Sprite.from_png("assets/generated/fox-sheet.png")` restores frame rectangles, names,
 durations, tags, and palette when the adjacent sheet JSON is present. A flattened
 image cannot recover separate drawing layers. Without metadata, supply
 `frame_width` and `frame_height` to slice a sheet, or import a single PNG.
@@ -485,21 +485,21 @@ image cannot recover separate drawing layers. Without metadata, supply
 
 ## Inspect and verify
 
-The [Tideglass Station example](examples/tideglass.py) exercises scene
+The [Tideglass Station example](assets/tideglass/build.py) exercises scene
 composition and a complete animated asset delivery:
 
 ```bash
-uv run python examples/tideglass.py
-uv run python -m pixaac.preview examples/tideglass.py --sprite station
+uv run python assets/tideglass/build.py
+uv run python -m pixaac.preview assets/tideglass/build.py --sprite station
 ```
 
-`out/tideglass/` contains native PNGs, enlarged previews, GIF/APNG animations,
+`assets/tideglass/generated/` contains native PNGs, enlarged previews, GIF/APNG animations,
 extruded sheets with JSON, editable snapshots, and `review.png` / `poses.png`
 inspection boards. The [feedback log](docs/tideglass-feedback.md) records the
 art and SDK changes discovered while making these assets, along with validation
 and outstanding release gates.
 
-![Tideglass Station animation](docs/images/tideglass-motion.gif)
+![Tideglass Station animation](assets/tideglass/showcase/station-motion.gif)
 
 The [release procedure](docs/releasing.md) includes isolated-wheel verification
 and repeatable browser checks. Integration checks for a particular game engine
@@ -522,34 +522,41 @@ For procedural art, own randomness explicitly with a seeded Python
 `random.Random`. Identical drawing inputs produce identical pixels. Pin your
 Python and dependency versions when reproducible encoded files also matter.
 
-To regenerate the Moonlit Market images shown at the top of this README:
+To regenerate the documented Moonlit Market and Tideglass artwork:
 
 ```bash
-python -m scripts.build_readme_art
+python -m assets.build_showcase
 ```
 
-This uses the same asset factories as `examples/moonlit_market.py` and writes
-only the four showcase images under `docs/images/`.
+This runs the collection builders, refreshes their ignored `generated/` exports,
+and updates the curated images in each collection's `showcase/` folder.
+Browser screenshots are kept separately under `assets/screenshots/`.
 
 ## Project layout
 
-Keep source art next to the code that uses it:
+All artwork lives under [`assets/`](assets/README.md), grouped by collection:
 
 ```text
-art/
-  palettes.py       # shared colors
-  parts.py          # eyes, joints, armor, foliage
-  characters.py     # asset factories
-  build.py          # variants, animations, exports
-out/
-  characters.png
-  characters.json
+assets/
+  moonlit_market/
+    build.py        # source palettes, parts, and asset factories
+    showcase/       # curated images used by README and feedback notes
+    generated/      # rebuildable exports; ignored by Git
+  tideglass/        # same structure for the coastal asset set
+  robot/            # additional SDK example, exercised by tests
+  courier/          # grouped-movement example, exercised by tests
+  fixtures/         # legacy snapshot used by compatibility tests
+  screenshots/      # browser verification evidence
+  generated/        # scratch outputs from README code snippets; ignored
+  build_showcase.py # regenerate the documented artwork
 ```
 
 An asset build is a Python program. It can accept arguments, read configuration,
 run under a build system, and return a failing exit code if validation fails.
 Generated PNGs and sprite snapshots are outputs; editing the Python source and
-running it again is the primary workflow.
+running it again is the primary workflow. Builders default to their own
+collection's `generated/` directory regardless of the current working directory;
+pass an output directory argument to export elsewhere.
 
 ## Design principles
 

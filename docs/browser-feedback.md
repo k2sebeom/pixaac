@@ -19,7 +19,8 @@ earlier browser-unavailable limitation.
 - **Console noise:** the browser requests `/favicon.ico`, which returns 404.
   Supply an inline icon so a clean preview does not begin with a failed request.
 
-The initial screenshot is `out/browser-checks/mobile-before.png`.
+The initial screenshot recorded the overflow and was removed with the scratch
+trial artifacts during asset consolidation.
 Rebuild/error recovery, animation boundary cases, and post-fix screenshots are
 checked in the next pass.
 
@@ -29,8 +30,8 @@ checked in the next pass.
 allows selectors to shrink inside their labels, and supplies an inline favicon.
 At 390 px, document width is now exactly 390 px. The repeatable browser check
 also passes at 320, 650, 651, and 1280 px, with desktop panes aligned at the top.
-See the [corrected mobile layout](images/preview-mobile.png) and
-[desktop onion/comparison view](images/preview-onions.png).
+See the [corrected mobile layout](../assets/screenshots/preview-mobile.png) and
+[desktop onion/comparison view](../assets/screenshots/preview-onions.png).
 
 Browser: Chrome 152, through browser-use MCP. Completed:
 
@@ -58,8 +59,9 @@ Browser: Chrome 152, through browser-use MCP. Completed:
   missing-name URLs show the documented fallback. A fresh normal page load
   has **zero console errors or warnings**.
 
-The temporary fixture is under `out/browser-checks/`; original artwork scripts
-were not changed. Screenshots were visually inspected for sharp pixels,
+The temporary fixture was removed during asset consolidation; original artwork
+scripts were not changed by that fixture. Retained screenshots are under
+`assets/screenshots/` and were visually inspected for sharp pixels,
 checkerboard transparency, aligned overlays, and usable controls.
 
 All **140 regression tests pass** after the fixes. The reusable browser-use

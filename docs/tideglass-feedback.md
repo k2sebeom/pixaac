@@ -1,6 +1,6 @@
 # Tideglass production trial
 
-Date: 2026-09-14. Source: [examples/tideglass.py](../examples/tideglass.py).
+Date: 2026-09-14. Source: [assets/tideglass/build.py](../assets/tideglass/build.py).
 All artwork is made with PixaaC; Pillow only arranges the review board.
 
 ## Loop 1 — compose an actual asset set
@@ -8,7 +8,7 @@ All artwork is made with PixaaC; Pillow only arranges the review board.
 Built a 160×96 coastal scene, a 32×48 animated lighthouse, a separately
 recolored storm beacon, and a 32×24 animated cutter. Exported PNGs, GIFs,
 APNGs, sheets, and editable snapshots. Inspected the native scene and 6×
-review board in `out/tideglass/review.png`.
+review board in `assets/tideglass/generated/review.png`.
 
 The scene reads at native resolution: the warm lighthouse is the focal point,
 the pale sail is the secondary shape, and the cool moon path balances them.
@@ -57,9 +57,10 @@ matches its original render exactly while the destination's warm light keys
 remain unchanged. The regression suite also tests partial alpha, transparent
 gutters, clipped placements, self-copy, invalid arguments, and nonzero tag ranges.
 
-Inspected the [review board](images/tideglass-review.png) at native and enlarged
-sizes, the [complete pose board](images/tideglass-poses.png), and an opaque
-2×2 extrusion fixture (`out/tideglass/extrusion-review.png`). The fixture confirms
+Inspected the [review board](../assets/tideglass/showcase/review.png) at native and enlarged
+sizes, the [complete pose board](../assets/tideglass/showcase/poses.png), and an opaque
+2×2 extrusion fixture. That temporary fixture was removed during asset cleanup;
+its assertions remain in `tests/test_sheet_extrusion.py`. The fixture confirmed
 edge/corner duplication with a transparent gap between frames. The final art has
 a quiet beacon beam, broken shoreline highlights, irregular wave lengths, and a
 dark foreground that frames the scene. Lamp movement stays inside its glass;
@@ -74,7 +75,7 @@ configured but has not run on hosted CI. Target-engine sampling and art directio
 acceptance remain release-context checks. These limits prevent an unconditional
 claim that the entire product is production-ready.
 
-![Tideglass Station review](images/tideglass-review.png)
+![Tideglass Station review](../assets/tideglass/showcase/review.png)
 
 ## Loop 3 — inspect the refined exported animation
 

@@ -1,7 +1,7 @@
 """Tideglass Station — hand-placed pixel clusters, authored entirely in PixaaC.
 
-Run: uv run python examples/tideglass.py
-Preview: uv run python -m pixaac.preview examples/tideglass.py --sprite station
+Run: uv run python assets/tideglass/build.py
+Preview: uv run python -m pixaac.preview assets/tideglass/build.py --sprite station
 """
 from pathlib import Path
 import sys
@@ -252,4 +252,4 @@ def export(directory: Path):
 
 
 if __name__ == "__main__":
-    export(Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out/tideglass"))
+    export(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "generated")
